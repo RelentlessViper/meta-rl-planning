@@ -51,6 +51,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+wandb/
 
 # Translations
 *.mo
@@ -221,3 +222,7 @@ __pycache__/
 
 # Garbage
 main_test.py
+test_connection.py
+test.py
+notes.md
+experiment_results/
