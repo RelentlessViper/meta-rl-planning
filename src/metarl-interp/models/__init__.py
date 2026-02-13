@@ -1,14 +1,10 @@
-from .lstm_rl2 import RL2LSTMPolicy, collect_rollouts, evaluate
-from .update import ppo_update
-from .preprocessing import one_hot, preprocess_input, compute_advantages
+from .lstm_ppo import LSTMPPO, layer_init
+from .utils import one_hot, one_hot_to_idx, Args
 
 __all__ = [
-    "RL2LSTMPolicy",
-    "collect_rollouts",
-    "evaluate",
-    "ppo_update",
-    "evaluate",
+    "LSTMPPO",
+    "layer_init",
     "one_hot",
-    "preprocess_input",
-    "compute_advantages",
+    "one_hot_to_idx",
+    "Args",
 ]
