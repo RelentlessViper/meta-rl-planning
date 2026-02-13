@@ -223,6 +223,6 @@ __pycache__/
 # Garbage
 main_test.py
 test_connection.py
-test.py
+test/
 notes.md
 experiment_results/
