@@ -1,5 +1,7 @@
-from .dark_room_meta import DarkRoomRL2Wrapper
+from .dark_room_meta import RL2DarkRoom
+from .render_scaler import RenderScalerDarkRoom
 
 __all__ = [
-    "DarkRoomRL2Wrapper",
+    "RL2DarkRoom"
+    "RenderScalerDarkRoom",
 ]
