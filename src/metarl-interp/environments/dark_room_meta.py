@@ -1,77 +1,47 @@
 import gymnasium as gym
-import toymeta
 
-import numpy as np
+class RL2DarkRoom(gym.Wrapper):
+    """
+    RL^2 wrapper for Dark Room environment
+    """
 
-env = gym.make("Dark-Room-3x3-v0")
-env.observation_space.sample()
-
-class DarkRoomRL2Wrapper(gym.Wrapper):
-    def __init__(self, env):
-        """
-        Initialize the distirbution of tasks.
-
-        Parameters
-        ----------
-        env:
-            A [Dark Room environment](https://github.com/corl-team/toy-meta-gym/blob/main/src/toymeta/__init__.py)
-        """
+    def __init__(
+        self,
+        env,
+        episodes_per_trial=3
+    ):
         super().__init__(env)
-        base_env = self.env.unwrapped
-
-        base_env.terminate_on_goal = True
-        base_env.random_start = False
-
-        self._grid_size = base_env.size
-
-    def sample_task(self) -> dict[str:any]:
-        """
-        Sample a task with a fixed random goal position
-
-        Returns
-        ----------
-        Position of fixed random goal
-        """
-        goal_pos = np.random.randint(0, self._grid_size, size=2)
-        return {"goal": goal_pos}
+        self.base_env = env.unwrapped
+        self.episodes_per_trial = episodes_per_trial
+        self.episode_counter = 0
     
-    def set_task(self, task):
+    def reset(self, **kwargs):
         """
-        Set a fixed goal position for a task
-
-        Parameters
-        ----------
-        task:
-            A dictionary for task-specific parameters. In our case it is a goal position {"goal": goal_pos}, where goal_pos in [0;self._grid_size]
+        Reset the environment (the agent position). If it was the last episode of a trial, then the new goal position will be sampled. Otherwise, the goal position remains the same.
         """
-        self._task = task
-        self._fixed_goal = np.array(task["goal"], dtype=np.int64)
-
-    # Override the reset method
-    def reset(self, *, seed=None, options=None):
+        if self.episode_counter == 0:
+            obs, info = self.base_env.reset(**kwargs)
+            self.base_env.goal_pos = self.base_env.generate_goal()
+        else:
+            obs, info = self.base_env.reset(**kwargs)
+            
+        return obs, info
+    
+    def step(self, action):
         """
-        Reset the task without resetting the goal position (required for RL^2)
-
-        Parameters
-        ----------
-        *args:
-            List of arguments
-        seed:
-            Random seed
-        options:
-            Options dictionary
-
-        Returns
-        ----------
-        A tuple containing the current observation and the logging info
+        Modified RL^2 step method. If an episode within the trial ends, it will return a new episode state with `False` done signal. Otherwise, the usual output is sent.
         """
-        state, info = self.env.reset(seed=seed, options=options)
+        next_obs, reward, terminated, truncated, info = self.base_env.step(action)
+        done = terminated or truncated
 
-        if self._fixed_goal is None:
-            raise RuntimeError("Task settings are not set. Call env.set_task(task) before calling this method")
+        if done:
+            self.episode_counter += 1
+
+            if self.episode_counter >= self.episodes_per_trial:
+                self.episode_counter = 0
+                return next_obs, reward, terminated, truncated, info
+            else:
+                next_obs, info = self.reset()
+                return next_obs, reward, False, False, info
         
-        base_env = self.env.unwrapped
-        base_env.goal_pos = self._fixed_goal.copy()
-        assert np.array_equal(base_env.goal_pos, self._fixed_goal)
-
-        return state, info
+        return next_obs, reward, terminated, truncated, info
