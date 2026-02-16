@@ -27,11 +27,14 @@ class LSTMPPO(nn.Module):
         self,
         envs,
         hidden_size,
+        in_features=None,
         num_layers=1,
     ):
         super().__init__()
+        if in_features is None:
+            in_features = np.array(envs.single_observation_space.n).prod()
         self.fc_0 = nn.Linear(
-            in_features=np.array(envs.single_observation_space.n).prod(),
+            in_features=in_features,
             out_features=hidden_size,
         )
         self.lstm = nn.LSTM(
