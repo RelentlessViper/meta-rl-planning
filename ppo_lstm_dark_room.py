@@ -1,3 +1,4 @@
+# %%
 import os
 import random
 import time
@@ -7,6 +8,7 @@ from dataclasses import dataclass
 from tqdm import trange
 import toymeta
 import gymnasium as gym
+from gymnasium.envs import register
 import numpy as np
 import torch
 import torch.nn as nn
@@ -14,6 +16,16 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from src.environments.dark_room_wrappers import RL2DarkRoom
 
+register(
+    id="Dark-Room-5x5-v0",
+    entry_point="toymeta.dark_room:DarkRoom",
+    max_episode_steps=15,
+    kwargs={
+        "size": 5,
+        "random_start": False,
+        "terminate_on_goal": False,
+    },
+)
 
 @dataclass
 class TrainConfig:
@@ -21,19 +33,20 @@ class TrainConfig:
     seed: int = 1
     torch_deterministic: bool = False
     cuda: bool = True
-    track: bool = False
+    track: bool = True
     wandb_project_name: str = "rl2-darkroom-meta"
     capture_video: bool = False
+    save_best_model: bool = False
 
     # Algorithm specific arguments
-    env_id: str = "Dark-Room-3x3-v0"
+    env_id: str = "Dark-Room-5x5-v0"
     num_trials: int = 3
-    hidden_size: int = 64
+    hidden_size: int = 128
     num_layers: int = 1
     total_timesteps: int = 10_000_000
     learning_rate: float = 1e-3
-    num_envs: int = 64
-    num_steps: int = 16
+    num_envs: int = 128
+    num_steps: int = 32
     anneal_lr: bool = True
     gamma: float = 0.99
     gae_lambda: float = 0.95
@@ -80,7 +93,7 @@ class Agent(nn.Module):
             layer_init(nn.Linear(np.prod(envs.single_observation_space.shape), hidden_size)),
             nn.ReLU(),
         )
-        self.lstm = nn.LSTM(hidden_size, hidden_size, num_layers=num_layers)
+        self.lstm = nn.GRU(hidden_size, hidden_size, num_layers=num_layers)
         for name, param in self.lstm.named_parameters():
             if "bias" in name:
                 nn.init.constant_(param, 0)
@@ -89,32 +102,29 @@ class Agent(nn.Module):
         self.actor = layer_init(nn.Linear(hidden_size, envs.single_action_space.n), std=0.01)
         self.critic = layer_init(nn.Linear(hidden_size, 1), std=1)
 
-    def get_states(self, x, lstm_state, done):
+    def get_state(self, x, lstm_state, done):
         hidden = self.in_proj(x)
 
         # LSTM logic
-        batch_size = lstm_state[0].shape[1]
+        batch_size = lstm_state.shape[1]
         hidden = hidden.reshape((-1, batch_size, self.lstm.input_size))
         done = done.reshape((-1, batch_size))
         new_hidden = []
         for h, d in zip(hidden, done):
             h, lstm_state = self.lstm(
                 h.unsqueeze(0),
-                (
-                    (1.0 - d).view(1, -1, 1) * lstm_state[0],
-                    (1.0 - d).view(1, -1, 1) * lstm_state[1],
-                ),
+                (1.0 - d).view(1, -1, 1) * lstm_state,
             )
             new_hidden += [h]
         new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
         return new_hidden, lstm_state
 
     def get_value(self, x, lstm_state, done):
-        hidden, _ = self.get_states(x, lstm_state, done)
+        hidden, _ = self.get_state(x, lstm_state, done)
         return self.critic(hidden)
 
     def get_action_and_value(self, x, lstm_state, done, action=None):
-        hidden, lstm_state = self.get_states(x, lstm_state, done)
+        hidden, lstm_state = self.get_state(x, lstm_state, done)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         if action is None:
@@ -166,13 +176,17 @@ def train(args: TrainConfig):
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
-    next_lstm_state = (
-        torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
-        torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device),
-    )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU)
+    next_lstm_state = torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device) # hidden and cell states (see https://youtu.be/8HyCNIVRbSU) Only hidden state since we are using GRU
+
+    # Model saving setup
+    if args.save_best_model:
+        running_return = 0.0
+        best_running_return = -float("inf")
+        best_model_path = os.path.join("checkpoints", f"{args.run_name}_best.pt")
+        os.makedirs("checkpoints", exist_ok=True)
 
     for iteration in trange(1, args.num_iterations + 1):
-        initial_lstm_state = (next_lstm_state[0].clone(), next_lstm_state[1].clone())
+        initial_lstm_state = next_lstm_state.clone()
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
@@ -207,7 +221,6 @@ def train(args: TrainConfig):
                             }, 
                             global_step
                         )
-                        # print(f"global_step={global_step}, goal={trial_goal}, episodic_return={infos['episode']['r'][i]}")
                         
         # bootstrap value if not done
         with torch.no_grad():
@@ -246,10 +259,9 @@ def train(args: TrainConfig):
                 end = start + envsperbatch
                 mbenvinds = envinds[start:end]
                 mb_inds = flatinds[:, mbenvinds].ravel()  # be really careful about the index
-
                 _, newlogprob, entropy, newvalue, _ = agent.get_action_and_value(
                     b_obs[mb_inds],
-                    (initial_lstm_state[0][:, mbenvinds], initial_lstm_state[1][:, mbenvinds]),
+                    initial_lstm_state[:, mbenvinds],
                     b_dones[mb_inds],
                     b_actions.long()[mb_inds],
                 )
@@ -289,6 +301,20 @@ def train(args: TrainConfig):
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
+
+        if args.save_best_model:
+            mean_return = rewards.sum(dim=0).mean().item()
+            running_return = 0.9 * running_return + 0.1 * mean_return
+            if running_return > best_running_return:
+                best_running_return = running_return
+                torch.save(
+                    {
+                        "model_state_dict": agent.state_dict(),
+                        "iteration": iteration,
+                        "best_running_return": best_running_return,
+                    },
+                    best_model_path,
+                )
 
         # # TRY NOT TO MODIFY: record rewards for plotting purposes
         if args.track:
