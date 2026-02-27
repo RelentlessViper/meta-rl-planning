@@ -9,12 +9,18 @@ from sklearn.metrics import f1_score
 from torch.utils.data import random_split
 
 from dataclasses import dataclass
+from typing import Any, Optional, Dict
 import draccus
 from tqdm import trange
 from sklearn.metrics import f1_score, classification_report
 import wandb
 import numpy as np
 import pandas as pd
+
+os.environ["HTTPS_PROXY"] = "http://NCdJf8:XEdKDQ@185.240.93.143:8000"
+os.environ["WANDB_ENTITY"] = "king_arthur-org"
+os.environ["WANDB_BASE_URL"] = "https://api.wandb.ai"
+os.environ["WANDB_API_KEY"] = "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"
 
 @dataclass
 class TrainConfig:
@@ -24,12 +30,12 @@ class TrainConfig:
     cuda: bool = True
     track: bool = False
     wandb_project_name: str = "rl2-darkroom-meta"
-    save_best_model: bool = False
+    save_model: bool = False
     dataset_paths: list[str] = None
     save_report: bool = False
     verbose: bool = False
 
-    num_probes: int = 3
+    probe_parameters: Optional[Dict[str, Any]] = None
     num_epochs: int = 15
     batch_size: int = 64
     learning_rate: float = 1e-3
@@ -37,6 +43,8 @@ class TrainConfig:
 
     def __post_init__(self):
         self.run_name = f"{self.exp_name}__{self.seed}__{int(time.time())}"
+        if self.dataset_paths == None or not self.dataset_paths:
+            raise ValueError(f"`dataset_paths` must be filled and have `len` >= 1, got: {self.dataset_paths}")
 
 import torch
 from torch.utils.data import Dataset
@@ -44,7 +52,7 @@ from torch.utils.data import Dataset
 class ProbeDataset(Dataset):
     def __init__(self, path):
         #tensors = torch.load(path)
-        hidden_states, actions, observations, grid_states = torch.load("datasets/probe-dataset-5x5/trial_0_dataset.pt")
+        hidden_states, _, _, grid_states = torch.load(path)
         self.hidden_states = hidden_states.float()
         self.grid_states = grid_states.long()
 
@@ -80,14 +88,13 @@ def make_splits(dataset, test_frac=0.2):
     n_train = n - n_test
     return random_split(dataset, [n_train, n_test])
 
-@draccus.wrap()
 def train_probe(
     dataset_path,
-    trial_name,
     epochs,
     batch_size,
     lr,
     lambda_l1,
+    probe_parameters=None,
     device="cpu",
     track=False,
     verbose=True,
@@ -99,7 +106,10 @@ def train_probe(
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False)
 
-    model = GridActionProbe().to(device)
+    if probe_parameters is not None:
+        model = GridActionProbe(**probe_parameters).to(device)
+    else:
+        model = GridActionProbe().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
 
@@ -158,9 +168,9 @@ def train_probe(
         val_f1 = f1_score(all_targets, all_preds, average="weighted")
         if verbose and epoch % 3 == 0:
             print(classification_report(all_targets, all_preds))
-            if save_report:
-                report = classification_report(all_targets, all_preds, output_dict=True, zero_division=0)
-                reports.append(report)
+        if save_report:
+            report = classification_report(all_targets, all_preds, output_dict=True, zero_division=0)
+            reports.append(report)
 
         if track:
             wandb.log({
@@ -210,12 +220,6 @@ def train(
     torch.backends.cudnn.deterministic = args.torch_deterministic
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    paths = [
-        "datasets/probe-dataset-5x5/trial_0_dataset.pt",
-        "datasets/probe-dataset-5x5/trial_1_dataset.pt",
-        "datasets/probe-dataset-5x5/trial_2_dataset.pt",
-    ]
-
     models = {}
 
     # Initialize wandb
@@ -233,16 +237,17 @@ def train(
 
     summary_reports = []
 
-    for trial_idx, path in enumerate(paths):
-        print(f"Current trial: {trial_idx}")
-        dataset = ProbeDataset(path)
+    for probe_idx, path in enumerate(args.dataset_paths):
+        if args.verbose:
+            print(f"Current probe: {probe_idx}")
+        #dataset = ProbeDataset(path)
         res = train_probe(
-            dataset,
-            trial_idx,
+            path,
             args.num_epochs,
             args.batch_size,
             args.learning_rate,
             args.l1_lambda,
+            args.probe_parameters,
             device,
             args.track,
             args.verbose,
@@ -254,8 +259,11 @@ def train(
             summary_reports.append(summarize_trial_reports(reports))
         else:
             model = res
-
-        models[f"trial_{trial_idx}"] = model
+        
+        if len(args.dataset_paths) == 1:
+            models[f"all_trials"] = model
+        else:  
+            models[f"trial_{probe_idx}"] = model
 
     # Save reports locally
     if args.save_report:
@@ -269,7 +277,7 @@ def train(
             report.to_csv(report_path, index=False)
 
     # Model saving setup
-    if args.save_best_model:
+    if args.save_model:
         best_model_path = os.path.join("checkpoints", f"{args.run_name}_best.pt")
         os.makedirs("checkpoints", exist_ok=True)
         torch.save(
