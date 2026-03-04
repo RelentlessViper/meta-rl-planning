@@ -17,11 +17,6 @@ import wandb
 import numpy as np
 import pandas as pd
 
-os.environ["HTTPS_PROXY"] = "http://NCdJf8:XEdKDQ@185.240.93.143:8000"
-os.environ["WANDB_ENTITY"] = "king_arthur-org"
-os.environ["WANDB_BASE_URL"] = "https://api.wandb.ai"
-os.environ["WANDB_API_KEY"] = "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"
-
 @dataclass
 class TrainConfig:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
