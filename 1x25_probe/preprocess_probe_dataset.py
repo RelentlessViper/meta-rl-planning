@@ -9,9 +9,8 @@ from torch.utils.data import Dataset, TensorDataset, DataLoader
 
 @dataclass
 class DatasetPreprocessingConfig:
-    dataset_name: str = "1x1-probe-dataset-5x5g"
+    dataset_name: str = "1x25-probe-dataset-5x5g"
     seed: int = 1
-    probe_type: str = "1x1"
     existing_dataset_path: str = None
     save_path: str = None
     cuda: bool = True

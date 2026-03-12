@@ -47,10 +47,6 @@ class ProbePlotConfig:
     probe_checkpoint_path: str = None
     
     def __post_init__(self):
-        if self.model_checkpoint_path is None:
-            raise ValueError(f"`model_checkpoint_path` must be filled, got: {self.model_checkpoint_path}")
-        if self.probe_checkpoint_path is None:
-            raise ValueError(f"`probe_checkpoint_path` must be filled, got: {self.probe_checkpoint_path}")
         self.run_name = f"{self.env_id}__{self.exp_name}__{self.seed}__{int(time.time())}"
 
 class ProbeVisualizationWrapper(gym.Wrapper):
@@ -373,7 +369,8 @@ def render_probe_output(args: ProbePlotConfig):
     probes = []
     for idx, probe_weights in enumerate(torch.load(args.probe_checkpoint_path).values()):
         probe = GridActionProbe()
-        probe.load_state_dict(probe_weights)
+        if args.probe_checkpoint_path is not None:
+            probe.load_state_dict(probe_weights)
         probe.eval()
         probes.append(probe)
 
@@ -386,7 +383,8 @@ def render_probe_output(args: ProbePlotConfig):
     )
 
     agent = Agent(env, args.hidden_size, args.num_layers)
-    agent.load_state_dict(torch.load(args.model_checkpoint_path, weights_only=True)["model_state_dict"])
+    if args.model_checkpoint_path is not None:
+        agent.load_state_dict(torch.load(args.model_checkpoint_path, weights_only=True)["model_state_dict"])
     agent.eval()
 
     for episode in range(args.num_episodes):

@@ -43,8 +43,6 @@ class DatasetCollectionConfig:
     
     def __post_init__(self):
         self.dataset_len = gym.make(self.env_id).spec.max_episode_steps * self.num_trials * self.num_episodes # 5x5 setting: 3*15*5000 = 225000
-        if self.model_checkpoint_path is None:
-            raise ValueError("`model_checkpoint_path` must be filled")
         if not self.save_path:
             self.save_path = f"datasets/{self.dataset_name}"
 
@@ -121,7 +119,8 @@ def collect_trajectories(args: DatasetCollectionConfig):
 
     env = make_env(args.env_id, args.num_trials)
     agent = Agent(env, args.hidden_size, args.num_layers)
-    agent.load_state_dict(torch.load(args.model_checkpoint_path, weights_only=True)["model_state_dict"])
+    if args.model_checkpoint_path is not None:
+        agent.load_state_dict(torch.load(args.model_checkpoint_path, weights_only=True)["model_state_dict"])
     agent.eval()
     actions = []
     hidden_states = []
