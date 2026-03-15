@@ -158,12 +158,13 @@ def collect_trajectories(args: DatasetCollectionConfig):
                 next_obs, next_done = torch.Tensor(next_obs.reshape((1, -1))).to(device), torch.Tensor([next_done]).to(device)
 
                 if info["trial_done"]:
+                    goal_pos = env.unwrapped.goal_pos[0] * env.unwrapped.size + env.unwrapped.goal_pos[1]
                     trial_data[trial_counter] += [
                         {
                             "hidden_state": hidden_states,
                             "action": actions,
                             "observation": observations,
-                            "goal_pos": env.unwrapped.goal_pos,
+                            "goal_pos": goal_pos,
                             "trial_idx": trial_idxs,
                         }
                     ]
@@ -201,18 +202,19 @@ def collect_trajectories(args: DatasetCollectionConfig):
             cur_trial["grid_state"] = list(grid_states)
 
     trial_datasets = []
-    
+
     for trial_idx, trial in enumerate(trial_data):
+        trial_len = len(trial[0]["action"])
         hidden_states = torch.cat([torch.stack(item["hidden_state"]) for item in trial])
         actions = torch.cat([torch.stack(item["action"]) for item in trial])
         observations = torch.cat([torch.stack(item["observation"]) for item in trial])
         grid_states = torch.cat([torch.stack(item["grid_state"]) for item in trial])
+        goal_pos = torch.cat([torch.tensor(item["goal_pos"]).reshape((1, -1)).expand(trial_len, -1) for item in trial]).reshape(-1)
         trial_idxs = torch.cat([torch.stack(item["trial_idx"]) for item in trial])
         
         # Leave only unique elements
         unique_mask = []
         seen = set()
-
         for i in range(hidden_states.shape[0]):
             # Create a hashable representation
             key = torch.cat([
@@ -233,6 +235,7 @@ def collect_trajectories(args: DatasetCollectionConfig):
         actions = actions[unique_indices]
         observations = observations[unique_indices]
         grid_states = grid_states[unique_indices]
+        goal_pos = goal_pos[unique_indices]
         trial_idxs = trial_idxs[unique_indices]
 
         dataset = TensorDataset(
@@ -240,6 +243,7 @@ def collect_trajectories(args: DatasetCollectionConfig):
             actions,
             observations,
             grid_states,
+            goal_pos,
             trial_idxs,
         )
         trial_datasets.append(dataset)
