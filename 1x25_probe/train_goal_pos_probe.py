@@ -60,8 +60,8 @@ class ProbeDataset(Dataset):
 
         return hidden, pos
 
-class GridActionProbe(nn.Module):
-    def __init__(self, hidden_dim=512, grid_size=5):
+class GoalPosProbe(nn.Module):
+    def __init__(self, hidden_dim=515, grid_size=5):
         super().__init__()
         self.grid_size = grid_size
         self.linear = nn.Linear(hidden_dim, grid_size ** 2)
@@ -132,9 +132,9 @@ def train_probe(
     train_ds, test_ds = make_splits(dataset, test_frac=test_frac)
 
     if probe_parameters is not None:
-        model = GridActionProbe(**probe_parameters).to(device)
+        model = GoalPosProbe(**probe_parameters).to(device)
     else:
-        model = GridActionProbe().to(device)
+        model = GoalPosProbe().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     criterion = nn.CrossEntropyLoss()

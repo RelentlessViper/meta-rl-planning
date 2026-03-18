@@ -33,9 +33,7 @@ class ProbePlotConfig:
     seed: int = 1
     torch_deterministic: bool = False
     cuda: bool = True
-    track: bool = False
     wandb_project_name: str = "rl2-darkroom-meta"
-    capture_video: bool = False
 
     # Algorithm specific arguments
     env_id: str = "Dark-Room-5x5-v0"
@@ -44,16 +42,26 @@ class ProbePlotConfig:
     num_layers: int = 1
     num_episodes: int = 2
     model_checkpoint_path: str = None
-    probe_checkpoint_path: str = None
+    action_probe_checkpoint_path: str = None
+    goal_pos_probe_checkpoint_path: str = None
     
     def __post_init__(self):
         self.run_name = f"{self.env_id}__{self.exp_name}__{self.seed}__{int(time.time())}"
 
 class ProbeVisualizationWrapper(gym.Wrapper):
-    def __init__(self, env, probe_model, hidden_dim=512, trials_per_episode=3, device="cpu"):
+    def __init__(
+        self,
+        env,
+        action_probe_model,
+        goal_pos_probe_model,
+        hidden_dim=515,
+        trials_per_episode=3,
+        device="cpu"
+    ):
         super().__init__(env)
 
-        self.probe_model = probe_model
+        self.action_probe_model = action_probe_model
+        self.goal_pos_probe_model = goal_pos_probe_model
         self.device = device
 
         self.hidden_dim = hidden_dim
@@ -65,7 +73,7 @@ class ProbeVisualizationWrapper(gym.Wrapper):
         self.current_trial = 0
 
         self.probe_grids = [
-            np.full((self.grid_size, self.grid_size), -1, dtype=np.int64)
+            np.full((2, self.grid_size, self.grid_size), -1, dtype=np.int64) # Action prediction + goal position prediction
             for _ in range(self.trials_per_episode)
         ]
 
@@ -84,7 +92,10 @@ class ProbeVisualizationWrapper(gym.Wrapper):
         self.current_trial = 0
 
         self.probe_grids = [
-            np.full((self.grid_size, self.grid_size), -1, dtype=np.int64)
+            [
+                np.zeros((self.grid_size, self.grid_size)),  # action grid
+                np.zeros((self.grid_size, self.grid_size))   # goal prob grid
+            ]
             for _ in range(self.trials_per_episode)
         ]
 
@@ -118,156 +129,98 @@ class ProbeVisualizationWrapper(gym.Wrapper):
                     dim=-1
                 )  # [1, 512 + 3]
 
-                logits = self.probe_model(probe_input)  # [1, 25, 6]
+                action_logits = self.action_probe_model(probe_input)  # [1, 25, 6]
+                goal_pos_logits = self.goal_pos_probe_model(probe_input) # [1, 25]
 
-                probs = torch.softmax(logits, dim=-1)
+                action_probs = torch.softmax(action_logits, dim=-1)
+                goal_pos_probs = torch.softmax(goal_pos_logits, dim=-1)
 
-                preds = torch.argmax(probs, dim=-1)  # [1, 25]
+                action_preds = torch.argmax(action_probs, dim=-1)  # [1, 25]
 
-                grid = preds.squeeze(0).cpu().numpy().reshape(
+                action_grid = action_preds.squeeze(0).cpu().numpy().reshape(
                     self.grid_size,
-                    self.grid_size
+                    self.grid_size,
+                )
+                goal_pos_grid = torch.round(goal_pos_probs.squeeze(0), decimals=3).cpu().numpy().reshape(
+                    self.grid_size,
+                    self.grid_size,
                 )
 
-                self.probe_grids[trial] = grid
+                self.probe_grids[trial][0] = action_grid.copy()
+                self.probe_grids[trial][1] = goal_pos_grid.copy()
 
     def render(self):
         base_img = self.env.render()
 
         fig, axes = plt.subplots(
-            1,
+            2,
             self.trials_per_episode,
-            figsize=(12, 4),
+            figsize=(4 * self.trials_per_episode, 8),
             dpi=300
         )
 
         if self.trials_per_episode == 1:
-            axes = [axes]
+            axes = np.array(axes).reshape(2, 1)
 
-        for trial_idx, ax in enumerate(axes):
+        for trial_idx, (ax_action, ax_goal_pos) in enumerate(zip(axes[0], axes[1])):
 
             grid = self.probe_grids[trial_idx]
 
             if trial_idx < self.current_trial:
-                ax.set_title(f"Trial {trial_idx+1} (past)")
-                ax.axis("off")
-                continue
+                img = np.ones((self.grid_size, self.grid_size, 3))
+                timeline_title = "(past)"
+                hide_content = True
+            elif trial_idx == self.current_trial:
+                img = base_img
+                timeline_title = "(current)"
+                hide_content = False
+            else:
+                img = np.ones((self.grid_size, self.grid_size, 3))
+                timeline_title = "(predicted)"
+                hide_content = False
+            
+            for ax_type, ax in zip(["actions", "goal position"], [ax_action, ax_goal_pos]):
+                ax.imshow(img, extent=[0, self.grid_size, self.grid_size, 0])
+                ax.set_title(f"Trial {trial_idx+1} {ax_type} {timeline_title}")
 
-            if trial_idx == self.current_trial:
-                ax.imshow(base_img, extent=[0, self.grid_size, self.grid_size, 0])
-                ax.set_title(f"Trial {trial_idx+1} (current)")
+            if not hide_content:
+                for i in range(self.grid_size):
+                    for j in range(self.grid_size):
+                        action_idx = int(grid[0][i, j])
+                        if action_idx == -1:
+                            action_idx = 5
+                        goal_pos_prob = str(grid[1][i, j])
 
-            if trial_idx > self.current_trial:
-                ax.imshow(
-                    np.ones((self.grid_size, self.grid_size, 3)),
-                    extent=[0, self.grid_size, self.grid_size, 0]
-                )
-                ax.set_title(f"Trial {trial_idx+1} (predicted)")
+                        label = self.action_names[action_idx]
+                        if action_idx != 5 and label is not None:
+                            ax_action.text(
+                                j + 0.5,
+                                i + 0.5,
+                                label,
+                                ha="center",
+                                va="center",
+                                fontsize=10,
+                                fontweight="bold",
+                                bbox=dict(facecolor="white", alpha=0.5, edgecolor="none"),
+                            )
+                        
+                        ax_goal_pos.text(
+                            j + 0.5,
+                            i + 0.5,
+                            goal_pos_prob,
+                            ha="center",
+                            va="center",
+                            fontsize=10,
+                            fontweight="bold",
+                            bbox=dict(facecolor="white", alpha=0.5, edgecolor="none"),
+                        )
+                    
+            for ax in [ax_action, ax_goal_pos]:
+                ax.set_xticks(np.arange(self.grid_size + 1))
+                ax.set_yticks(np.arange(self.grid_size + 1))
+                ax.grid(True)
 
-            for i in range(self.grid_size):
-                for j in range(self.grid_size):
-
-                    action_idx = grid[i, j]
-
-                    if action_idx == -1:
-                        continue
-
-                    label = self.action_names[action_idx]
-
-                    if label is None:
-                        continue
-
-                    ax.text(
-                        j + 0.5,
-                        i + 0.5,
-                        label,
-                        ha="center",
-                        va="center",
-                        fontsize=10,
-                        fontweight="bold",
-                        bbox=dict(facecolor="white", alpha=0.5, edgecolor="none"),
-                    )
-
-            ax.set_xticks(np.arange(self.grid_size + 1))
-            ax.set_yticks(np.arange(self.grid_size + 1))
-            ax.grid(True)
-
-        fig.canvas.draw()
-
-        rgba = np.asarray(fig.canvas.buffer_rgba())
-        rgb = rgba[:, :, :3]
-
-        plt.close(fig)
-
-        return rgb
-    
-    def render(self):
-        base_img = self.env.render()
-
-        fig, axes = plt.subplots(
-            1,
-            self.trials_per_episode,
-            figsize=(12, 4),
-            dpi=300
-        )
-
-        if self.trials_per_episode == 1:
-            axes = [axes]
-
-        for trial_idx, ax in enumerate(axes):
-
-            grid = self.probe_grids[trial_idx]
-
-            # Past trials
-            if trial_idx < self.current_trial:
-                ax.set_title(f"Trial {trial_idx+1} (past)")
-                ax.axis("off")
-                continue
-
-            # Current trial
-            if trial_idx == self.current_trial:
-                ax.imshow(base_img, extent=[0, self.grid_size, self.grid_size, 0])
-                ax.set_title(f"Trial {trial_idx+1} (current)")
-
-            # Future trials
-            if trial_idx > self.current_trial:
-
-                # draw empty grid
-                ax.imshow(
-                    np.ones((self.grid_size, self.grid_size, 3)),
-                    extent=[0, self.grid_size, self.grid_size, 0]
-                )
-
-                ax.set_title(f"Trial {trial_idx+1} (predicted)")
-
-            for i in range(self.grid_size):
-                for j in range(self.grid_size):
-
-                    action_idx = grid[i, j]
-
-                    if action_idx == -1:
-                        continue
-
-                    label = self.action_names[action_idx]
-
-                    if label is None:
-                        continue
-
-                    ax.text(
-                        j + 0.5,
-                        i + 0.5,
-                        label,
-                        ha="center",
-                        va="center",
-                        fontsize=10,
-                        fontweight="bold",
-                        bbox=dict(facecolor="white", alpha=0.5, edgecolor="none"),
-                    )
-
-            ax.set_xticks(np.arange(self.grid_size + 1))
-            ax.set_yticks(np.arange(self.grid_size + 1))
-            ax.grid(True)
-
+        fig.tight_layout()
         fig.canvas.draw()
 
         rgba = np.asarray(fig.canvas.buffer_rgba())
@@ -280,14 +233,15 @@ class ProbeVisualizationWrapper(gym.Wrapper):
 def make_env(
     env_id,
     run_name,
-    probe_model,
+    action_probe_model,
+    goal_pos_probe_model,
     device,
     num_trials
 ):
     env = gym.make(env_id)
     env = RL2DarkRoom(env, trials_per_episode=num_trials)
     #env = RL2ProbeWrapper(env, trials_per_episode=num_trials)
-    env = ProbeVisualizationWrapper(env, probe_model, device)
+    env = ProbeVisualizationWrapper(env, action_probe_model, goal_pos_probe_model, device)
     env = RecordVideo(
         env,
         f"videos/{run_name}",
@@ -357,6 +311,15 @@ class GridActionProbe(nn.Module):
     def forward(self, hidden_states):
         x = self.linear(hidden_states) # [B,5x5x6]
         return x.reshape((-1, self.grid_size ** 2, self.num_actions)) # [B,25,6]
+    
+class GoalPosProbe(nn.Module):
+    def __init__(self, hidden_dim=515, grid_size=5):
+        super().__init__()
+        self.grid_size = grid_size
+        self.linear = nn.Linear(hidden_dim, grid_size ** 2)
+
+    def forward(self, hidden_states):
+        return self.linear(hidden_states) # [B,25]
 
 @draccus.wrap()
 def render_probe_output(args: ProbePlotConfig):
@@ -366,18 +329,27 @@ def render_probe_output(args: ProbePlotConfig):
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    probes = []
-    for idx, probe_weights in enumerate(torch.load(args.probe_checkpoint_path).values()):
-        probe = GridActionProbe()
-        if args.probe_checkpoint_path is not None:
-            probe.load_state_dict(probe_weights)
-        probe.eval()
-        probes.append(probe)
+    action_probes = []
+    for idx, probe_weights in enumerate(torch.load(args.action_probe_checkpoint_path).values()):
+        action_probe = GridActionProbe()
+        if args.action_probe_checkpoint_path is not None:
+            action_probe.load_state_dict(probe_weights)
+        action_probe.eval()
+        action_probes.append(action_probe)
+    
+    goal_pos_probes = []
+    for idx, probe_weights in enumerate(torch.load(args.goal_pos_probe_checkpoint_path).values()):
+        goal_pos_probe = GoalPosProbe()
+        if args.goal_pos_probe_checkpoint_path is not None:
+            goal_pos_probe.load_state_dict(probe_weights)
+        goal_pos_probe.eval()
+        goal_pos_probes.append(goal_pos_probe)
 
     env = make_env(
         args.env_id,
         args.run_name,
-        probes[0],
+        action_probes[0],
+        goal_pos_probes[0],
         device,
         args.num_trials,
     )
