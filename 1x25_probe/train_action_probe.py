@@ -40,6 +40,9 @@ class TrainConfig:
     learning_rate: float = 1e-3
     l1_lambda: float = 1e-5
 
+    # Dark Room arguments
+    room_size: int = 5
+
     def __post_init__(self):
         self.run_name = f"{self.exp_name}__{self.seed}__{int(time.time())}"
         if self.dataset_paths == None or not self.dataset_paths:
@@ -132,6 +135,7 @@ def train_probe(
     verbose=True,
     save_report=False,
     test_frac=0.2,
+    room_size=5,
 ):
     # Load Data
     dataset = torch.load(dataset_path, weights_only=False)
@@ -140,7 +144,7 @@ def train_probe(
     if probe_parameters is not None:
         model = GridActionProbe(**probe_parameters).to(device)
     else:
-        model = GridActionProbe().to(device)
+        model = GridActionProbe(grid_size=room_size).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     criterion = nn.CrossEntropyLoss()
@@ -286,6 +290,7 @@ def train(
             args.verbose,
             args.save_report,
             args.test_frac,
+            args.room_size,
         )
 
         if args.save_report:

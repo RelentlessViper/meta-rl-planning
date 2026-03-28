@@ -81,7 +81,7 @@ def preprocess_dataset(
 
     os.makedirs(args.save_path, exist_ok=True)
     all_features, all_targets = [], []
-    for idx, (hidden_states, actions, observations, grid_states, trial_idxs) in enumerate(tqdm(dataloader, desc="Preprocessing")):
+    for idx, (hidden_states, actions, observations, grid_states, goal_pos, trial_idxs) in enumerate(tqdm(dataloader, desc="Preprocessing")):
         features, targets = process_batch_to_grid_samples(
             hidden_states,
             actions,

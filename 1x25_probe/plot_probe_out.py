@@ -16,17 +16,6 @@ from torch.distributions.categorical import Categorical
 
 from dark_room_wrappers import RL2DarkRoom
 
-register(
-    id="Dark-Room-5x5-v0",
-    entry_point="toymeta.dark_room:DarkRoom",
-    max_episode_steps=15,
-    kwargs={
-        "size": 5,
-        "random_start": False,
-        "terminate_on_goal": False,
-    },
-)
-
 @dataclass
 class ProbePlotConfig:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -36,7 +25,7 @@ class ProbePlotConfig:
     wandb_project_name: str = "rl2-darkroom-meta"
 
     # Algorithm specific arguments
-    env_id: str = "Dark-Room-5x5-v0"
+    env_id: str = None
     num_trials: int = 3
     hidden_size: int = 512
     num_layers: int = 1
@@ -44,8 +33,24 @@ class ProbePlotConfig:
     model_checkpoint_path: str = None
     action_probe_checkpoint_path: str = None
     goal_pos_probe_checkpoint_path: str = None
+
+    # Dark Room arguments
+    room_size: int = 5
+    max_trial_timesteps: int = 15
     
     def __post_init__(self):
+        if self.env_id is None:
+            self.env_id = f"Dark-Room-{self.room_size}x{self.room_size}-v0"
+            register(
+                id=f"Dark-Room-{self.room_size}x{self.room_size}-v0",
+                entry_point="toymeta.dark_room:DarkRoom",
+                max_episode_steps=self.max_trial_timesteps,
+                kwargs={
+                    "size": self.room_size,
+                    "random_start": False,
+                    "terminate_on_goal": False,
+                },
+            )
         self.run_name = f"{self.env_id}__{self.exp_name}__{self.seed}__{int(time.time())}"
 
 class ProbeVisualizationWrapper(gym.Wrapper):
@@ -210,7 +215,7 @@ class ProbeVisualizationWrapper(gym.Wrapper):
                             goal_pos_prob,
                             ha="center",
                             va="center",
-                            fontsize=10,
+                            fontsize=5,
                             fontweight="bold",
                             bbox=dict(facecolor="white", alpha=0.5, edgecolor="none"),
                         )
@@ -331,7 +336,7 @@ def render_probe_output(args: ProbePlotConfig):
 
     action_probes = []
     for idx, probe_weights in enumerate(torch.load(args.action_probe_checkpoint_path).values()):
-        action_probe = GridActionProbe()
+        action_probe = GridActionProbe(grid_size=args.room_size)
         if args.action_probe_checkpoint_path is not None:
             action_probe.load_state_dict(probe_weights)
         action_probe.eval()
@@ -339,7 +344,7 @@ def render_probe_output(args: ProbePlotConfig):
     
     goal_pos_probes = []
     for idx, probe_weights in enumerate(torch.load(args.goal_pos_probe_checkpoint_path).values()):
-        goal_pos_probe = GoalPosProbe()
+        goal_pos_probe = GoalPosProbe(grid_size=args.room_size)
         if args.goal_pos_probe_checkpoint_path is not None:
             goal_pos_probe.load_state_dict(probe_weights)
         goal_pos_probe.eval()

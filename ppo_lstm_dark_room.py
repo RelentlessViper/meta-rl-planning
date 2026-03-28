@@ -15,17 +15,6 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from src.environments.dark_room_wrappers import RL2DarkRoom
 
-register(
-    id="Dark-Room-5x5-v0",
-    entry_point="toymeta.dark_room:DarkRoom",
-    max_episode_steps=15,
-    kwargs={
-        "size": 5,
-        "random_start": False,
-        "terminate_on_goal": False,
-    },
-)
-
 @dataclass
 class TrainConfig:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -37,8 +26,11 @@ class TrainConfig:
     capture_video: bool = False
     save_best_model: bool = False
 
+    # Dark Room arguments
+    room_size: int = 5
+    max_trial_timesteps: int = 15
+
     # Algorithm specific arguments
-    env_id: str = "Dark-Room-5x5-v0"
     num_trials: int = 3
     hidden_size: int = 128
     num_layers: int = 1
@@ -62,7 +54,19 @@ class TrainConfig:
         self.batch_size = int(self.num_envs * self.num_steps)
         self.minibatch_size = int(self.batch_size // self.num_minibatches)
         self.num_iterations = self.total_timesteps // self.batch_size
+
+        self.env_id = f"Dark-Room-{self.room_size}x{self.room_size}-v0"
         self.run_name = f"{self.env_id}__{self.exp_name}__{self.seed}__{int(time.time())}"
+        register(
+            id=f"Dark-Room-{self.room_size}x{self.room_size}-v0",
+            entry_point="toymeta.dark_room:DarkRoom",
+            max_episode_steps=self.max_trial_timesteps,
+            kwargs={
+                "size": self.room_size,
+                "random_start": False,
+                "terminate_on_goal": False,
+            },
+        )
 
 
 def make_env(env_id, idx, capture_video, run_name, num_trials):

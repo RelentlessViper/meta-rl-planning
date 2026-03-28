@@ -1,6 +1,7 @@
 import os
 import random
 from collections import deque
+import time
 
 import draccus
 from dataclasses import dataclass
@@ -15,17 +16,6 @@ from torch.distributions.categorical import Categorical
 from torch.utils.data import TensorDataset
 from dark_room_wrappers import RL2DarkRoom
 
-register(
-    id="Dark-Room-5x5-v0",
-    entry_point="toymeta.dark_room:DarkRoom",
-    max_episode_steps=15,
-    kwargs={
-        "size": 5,
-        "random_start": False,
-        "terminate_on_goal": False,
-    },
-)
-
 @dataclass
 class DatasetCollectionConfig:
     dataset_name: str = "probe-dataset-5x5"
@@ -34,17 +24,33 @@ class DatasetCollectionConfig:
     num_trials: int = 3
     probe_type: str = "one_for_all_trials"
     """The type of probe we want to train. Can be either 'one_for_all_trials' or 'one_for_each_trial'"""
-    env_id: str = "Dark-Room-5x5-v0"
     save_path: str = None
     model_checkpoint_path: str = None
     hidden_size: int = 512
     num_layers: int = 1
     cuda: bool = True
+
+    # Dark Room arguments
+    room_size: int = 5
+    max_trial_timesteps: int = 15
     
     def __post_init__(self):
-        self.dataset_len = gym.make(self.env_id).spec.max_episode_steps * self.num_trials * self.num_episodes # 5x5 setting: 3*15*5000 = 225000
         if not self.save_path:
             self.save_path = f"datasets/{self.dataset_name}"
+        
+        self.env_id = f"Dark-Room-{self.room_size}x{self.room_size}-v0"
+        #self.run_name = f"{self.env_id}__{self.exp_name}__{self.seed}__{int(time.time())}"
+        register(
+            id=f"Dark-Room-{self.room_size}x{self.room_size}-v0",
+            entry_point="toymeta.dark_room:DarkRoom",
+            max_episode_steps=self.max_trial_timesteps,
+            kwargs={
+                "size": self.room_size,
+                "random_start": False,
+                "terminate_on_goal": False,
+            },
+        )
+        self.dataset_len = gym.make(self.env_id).spec.max_episode_steps * self.num_trials * self.num_episodes # 5x5 setting: 3*15*5000 = 225000
 
 def make_env(env_id, num_trials):
     env = gym.make(env_id)
