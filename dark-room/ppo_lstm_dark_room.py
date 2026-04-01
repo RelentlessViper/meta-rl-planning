@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
-from src.environments.dark_room_wrappers import RL2DarkRoom
+from dark_room_wrappers import RL2DarkRoom
 
 @dataclass
 class TrainConfig:
