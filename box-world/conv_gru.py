@@ -1,4 +1,3 @@
-import os
 import torch
 from torch import nn
 
@@ -36,7 +35,7 @@ class ConvGRUCell(nn.Module):
     
     def init_hidden(self, batch_size):
         return torch.zeros((batch_size, self.hidden_dim, self.height, self.width), device=self.conv_gates.weight.device)
-    
+
     def forward(self, x, hidden_state):
         # x: [b, c, h, w]
         # hidden_state: [b, c_hidden, h, w]
@@ -68,7 +67,6 @@ class ConvGRU(nn.Module):
         num_layers = 1,
         batch_first = True,
         bias = True,
-        return_all_layers = False,  
     ):
         super().__init__()
 
@@ -82,7 +80,6 @@ class ConvGRU(nn.Module):
         self.num_layers = num_layers
         self.batch_first = batch_first
         self.bias = bias
-        self.return_all_layers = return_all_layers
 
         cells = []
         for i in range(self.num_layers):
@@ -101,39 +98,46 @@ class ConvGRU(nn.Module):
             )
         self.cells = nn.ModuleList(cells)
     
-    def forward(self, x, hidden_state=None):
-        # x: [b, c, h, w]
-        # h: [b, c_hidden, h, w]
-        # We don't have a timestep dimension here since this module is defined for RL-specific tasks where we have only one timestep at a time. I will probably extend this to handle tensors with timestep dim in the future.
-        
-        if len(x.shape) == 3: # Assume we have no batch dim
-            x = x.unsqueeze(0)
-        assert len(x.shape) == 4, (
-            f"Incorrect input shape: {x.shape}. Expected shape to be a 4-dim tensor"
-        )
+    def forward(self, x, hidden_state=None, return_all_layers=False):
+        # x: [b, t, c, h, w] or [t, b, c, h, w] if batch_first == True
+        if not self.batch_first:
+            # [t, b, c, h, w] -> [b, t, c, h, w]
+            x = x.permute(1, 0, 2, 3, 4)
 
         if hidden_state is None:
-            hidden_state = self.init_hidden(x.shape[0])
-        
-        hidden_states = []
+            hidden_state = self.init_hidden(x.size(0))
+
+        layer_output_list = []
+        last_state_list   = []
+
+        seq_len = x.size(1)
+        cur_layer_input = x
 
         for layer_idx in range(self.num_layers):
             h = hidden_state[layer_idx]
-            h = self.cells[layer_idx](x, h)
-            
-            hidden_states.append(h)
-            x = h
-        
-        if self.return_all_layers:
-            return hidden_states
-        else:
-            return hidden_states[-1]
+            output_inner = []
+            for t in range(seq_len):
+                # x: [b,t,c,h,w] h: [b, c_hidden, h, w] 
+                h = self.cells[layer_idx](x=cur_layer_input[:, t, :, :, :], hidden_state=h)
+                output_inner.append(h)
+
+            layer_output = torch.stack(output_inner, dim=1)
+            cur_layer_input = layer_output
+
+            layer_output_list.append(layer_output)
+            last_state_list.append(h)
+
+        if not return_all_layers:
+            layer_output_list = layer_output_list[-1:]
+            last_state_list   = last_state_list[-1:]
+
+        return torch.stack(layer_output_list), torch.stack(last_state_list)
     
     def init_hidden(self, batch_size):
         init_states = []
         for i in range(self.num_layers):
             init_states.append(self.cells[i].init_hidden(batch_size))
-        return init_states
+        return torch.stack(init_states)
 
     @staticmethod
     def _extend_for_multilayer(param, num_layers):
