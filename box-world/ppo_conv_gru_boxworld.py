@@ -5,14 +5,17 @@ import time
 import draccus
 from dataclasses import dataclass
 from tqdm import trange
+
 import toymeta
 import gymnasium as gym
 from gymnasium.envs import register
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
+
 from box_world_env import BoxWorld
 from conv_gru import ConvGRU
 
@@ -33,7 +36,7 @@ class TrainConfig:
     goal_length: int = 2
     num_distractor: int = 1
     distractor_length: int = 1
-    max_episode_timesteps: int = 10e3
+    max_episode_timesteps: int = 1e3
     collect_key: bool = True
     existing_world: np.ndarray = None
 
@@ -92,7 +95,7 @@ def make_env(env_id, idx, capture_video, run_name, capture_video_every_episode):
             env = gym.make(env_id)
         env = gym.wrappers.TransformObservation(
             env,
-            lambda obs: obs.astype(np.float32) / 255.0 * 2.0 - 1.0,
+            lambda obs: obs.astype(np.float32) / 255.0,
             env.observation_space,
         )
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -129,9 +132,8 @@ class ConvGRUAgent(nn.Module):
             batch_first=self.batch_first,
             bias=self.bias,
         )
-        self.pool = nn.AdaptiveAvgPool2d((1, 1)) # Spacial to vector
-        self.actor = nn.Linear(hidden_dim, num_actions)
-        self.critic = nn.Linear(hidden_dim, 1)
+        self.actor = nn.Linear(self.hidden_dim * self.input_size[0] * self.input_size[1], num_actions)
+        self.critic = nn.Linear(self.hidden_dim * self.input_size[0] * self.input_size[1], 1)
     
     def get_state(self, x, hidden_state, done):
         # x: [b * t, c, h, w]
@@ -157,9 +159,9 @@ class ConvGRUAgent(nn.Module):
             # [b, c_hidden, h, w]
             current_h = hidden_state[-1]
             
-            # [b, h]
-            pooled = self.pool(current_h).reshape((batch_size, -1))
-            outputs.append(pooled)
+            # [b, c_hidden * h * w]
+            flattened = current_h.reshape((batch_size, -1))
+            outputs.append(flattened)
             
         # Flatten time and batch back together
         hidden_out = torch.cat(outputs, dim=0)
@@ -174,7 +176,7 @@ class ConvGRUAgent(nn.Module):
 
     def get_action_and_value(self, x, hidden_state, done, action=None):
         # x: [b * t, c, h, w]
-        # hidden_state: [l, c_hidden, h, w]
+        # hidden_state: [l, b, c_hidden, h, w]
         # done: [b * t]
         hidden, hidden_state = self.get_state(x, hidden_state, done)
         logits = self.actor(hidden)
@@ -219,7 +221,7 @@ def train(args: TrainConfig):
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
-    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device).permute(0, 1, 4, 2, 3)
+    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
     actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -230,11 +232,11 @@ def train(args: TrainConfig):
     global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
-    next_obs = torch.from_numpy(next_obs).to(device).permute(0, 3, 1, 2)
+    next_obs = torch.from_numpy(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
     # next_hidden_state = torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device) # hidden and cell states (see https://youtu.be/8HyCNIVRbSU) Only hidden state since we are using GRU
     #next_hidden_state = agent.get_initial_state(args.batch_size, (args.field_size, args.field_size), device)
-    next_hidden_state = agent.conv_gru.init_hidden(args.num_envs) 
+    next_hidden_state = agent.conv_gru.init_hidden(args.num_envs)
 
     # Model saving setup
     if args.save_best_model:
@@ -268,7 +270,7 @@ def train(args: TrainConfig):
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.from_numpy(next_obs).to(device), torch.Tensor(next_done).to(device)
-            next_obs = next_obs.permute(0, 3, 1, 2)
+            next_obs = next_obs
 
             if "_episode" in infos and args.track:
                 for i, has_metrics in enumerate(infos["_episode"]):
@@ -296,7 +298,7 @@ def train(args: TrainConfig):
             returns = advantages + values
 
         # flatten the batch
-        b_obs = obs.reshape((-1,) + envs.single_observation_space.shape).permute(0, 3, 1, 2)
+        b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
         b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
         b_dones = dones.reshape(-1)
