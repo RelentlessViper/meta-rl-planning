@@ -47,6 +47,10 @@ class BoxWorld(gym.Env):
         max_steps=1000,
         collect_key=True,
         world=None,
+        step_cost=0.0,
+        reward_gem = 10.0,
+        reward_key = 1.0,
+        reward_distractor = -1.0,
         render_mode=None,
     ):
         super().__init__()
@@ -59,16 +63,16 @@ class BoxWorld(gym.Env):
         self.collect_key = collect_key
         self.render_mode = render_mode
 
-        self.step_cost = 0.0
-        self.reward_gem = 10.0
-        self.reward_key = 1.0
-        self.reward_distractor = -1.0
+        self.step_cost = step_cost
+        self.reward_gem = reward_gem
+        self.reward_key = reward_key
+        self.reward_distractor = reward_distractor
 
         self.action_space = spaces.Discrete(4)
         self.observation_space = spaces.Box(
             low=0,
             high=255,
-            shape=(n + 2, n + 2, 3),
+            shape=(3, n + 2, n + 2),
             dtype=np.float32,
         )
 
@@ -197,9 +201,8 @@ class BoxWorld(gym.Env):
         return obs, reward, terminated, truncated, info
 
     def _get_obs(self):
-        # Normalize to [-1, 1]
-        # return ((self.world.astype(np.float32) - grid_color[0]) / 255.0) * 2.0
-        return self.world.astype(np.float32) 
+        # [h, w, c] -> [c, h, w]
+        return np.transpose(self.world.astype(np.float32), (2, 0, 1))
 
     def render(self):
         img = self._get_render_image()
@@ -208,8 +211,7 @@ class BoxWorld(gym.Env):
             return img
 
         elif self.render_mode == "human":
-            if self._fig is None:
-                self._fig, self._ax = plt.subplots()
+            self._fig, self._ax = plt.subplots()
 
             self._ax.clear()
             self._ax.imshow(img, interpolation="nearest")
