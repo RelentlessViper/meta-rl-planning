@@ -36,6 +36,7 @@ class TrainConfig:
     goal_length: int = 2
     num_distractor: int = 1
     distractor_length: int = 1
+    keep_prev_world: bool = True
     max_episode_timesteps: int = 1e3
     collect_key: bool = True
     existing_world: np.ndarray = None
@@ -79,6 +80,7 @@ class TrainConfig:
                 max_steps = int(self.max_episode_timesteps),
                 collect_key = self.collect_key,
                 world = self.existing_world,
+                keep_prev_world = self.keep_prev_world,
             ),
         )
 
@@ -150,8 +152,9 @@ class ConvGRUAgent(nn.Module):
             xt = x[t] # [b, c, h, w]
             dt = done[t].reshape((-1, 1, 1, 1)) # [b, 1, 1, 1] 
             
-            for i in range(self.num_layers):
-                hidden_state[i] = hidden_state[i] * (1.0 - dt)
+            # for i in range(self.num_layers):
+            #     hidden_state[i] = hidden_state[i] * (1.0 - dt)
+            hidden_state = hidden_state * (1.0 - dt.unsqueeze(0))
             
             # ConvGRU expects [b, t, c, h, w], so unsqueeze T=1
             _, hidden_state = self.conv_gru(xt.unsqueeze(1), hidden_state)
