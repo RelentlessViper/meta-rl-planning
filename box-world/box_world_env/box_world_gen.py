@@ -1,12 +1,12 @@
 import numpy as np
 import random
 
-def sampling_pairs(num_pair, n=12):
+def sampling_pairs(num_pair, rng, n=12):
     possibilities = set(range(1, n*(n-1)))
     keys = []
     locks = []
     for k in range(num_pair):
-        key = random.sample(tuple(possibilities), 1)[0]
+        key = rng.sample(tuple(possibilities), 1)[0]
         key_x, key_y = key//(n-1), key%(n-1)
         lock_x, lock_y = key_x, key_y + 1
         to_remove = [key_x * (n-1) + key_y] +\
@@ -16,9 +16,9 @@ def sampling_pairs(num_pair, n=12):
         possibilities -= set(to_remove)
         keys.append([key_x, key_y])
         locks.append([lock_x, lock_y])
-    agent_pos = random.sample(tuple(possibilities), 1)
+    agent_pos = rng.sample(tuple(possibilities), 1)
     possibilities -= set(agent_pos)
-    first_key = random.sample(tuple(possibilities), 1)
+    first_key = rng.sample(tuple(possibilities), 1)
 
     agent_pos = np.array([agent_pos[0]//(n-1), agent_pos[0]%(n-1)])
     first_key = first_key[0]//(n-1), first_key[0]%(n-1)
@@ -40,16 +40,15 @@ wall_color = [0, 0, 0]
 def world_gen(n=12, goal_length=3, num_distractor=2, distractor_length=2, seed=None):
     """generate BoxWorld
     """
-    if seed is not None:
-        random.seed(seed)
+    rng = random.Random(seed)
 
     world_dic = {} # dic keys are lock positions, value is 0 if distractor, else 1.
     world = np.ones((n, n, 3)) * 220
-    goal_colors = random.sample(range(num_colors), goal_length - 1)
+    goal_colors = rng.sample(range(num_colors), goal_length - 1)
     distractor_possible_colors = [color for color in range(num_colors) if color not in goal_colors]
-    distractor_colors = [random.sample(distractor_possible_colors, distractor_length) for k in range(num_distractor)]
-    distractor_roots = random.choices(range(goal_length - 1), k=num_distractor)
-    keys, locks, first_key, agent_pos = sampling_pairs(goal_length - 1 + distractor_length * num_distractor, n)
+    distractor_colors = [rng.sample(distractor_possible_colors, distractor_length) for k in range(num_distractor)]
+    distractor_roots = rng.choices(range(goal_length - 1), k=num_distractor)
+    keys, locks, first_key, agent_pos = sampling_pairs(goal_length - 1 + distractor_length * num_distractor, rng, n)
 
 
     # first, create the goal path

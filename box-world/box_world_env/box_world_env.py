@@ -47,6 +47,7 @@ class BoxWorld(gym.Env):
         max_steps=1000,
         collect_key=True,
         world=None,
+        keep_prev_world=True,
         step_cost=0.0,
         reward_gem = 10.0,
         reward_key = 1.0,
@@ -81,6 +82,9 @@ class BoxWorld(gym.Env):
         self.world_dic = None
         self.owned_key = None
 
+        self.keep_prev_world = keep_prev_world
+        self.prev_seed = None
+
         self.num_steps = 0
         self.episode_reward = 0.0
 
@@ -90,10 +94,26 @@ class BoxWorld(gym.Env):
         super().reset(seed=seed)
 
         world_data = None
+
         if options is not None:
             world_data = options.get("world", None)
 
-        if world_data is None:
+        if world_data is not None:
+            self.world, self.player_position, self.world_dic = world_data
+        elif self.keep_prev_world and self.prev_seed is not None:
+            self.world, self.player_position, self.world_dic = world_gen(
+                n=self.n,
+                goal_length=self.goal_length,
+                num_distractor=self.num_distractor,
+                distractor_length=self.distractor_length,
+                seed=self.prev_seed,
+            )
+        else:
+            if seed is None:
+                seed = np.random.randint(0, 2**31 - 1)
+
+            self.prev_seed = seed
+
             self.world, self.player_position, self.world_dic = world_gen(
                 n=self.n,
                 goal_length=self.goal_length,
@@ -101,8 +121,6 @@ class BoxWorld(gym.Env):
                 distractor_length=self.distractor_length,
                 seed=seed,
             )
-        else:
-            self.world, self.player_position, self.world_dic = world_data
 
         self.num_steps = 0
         self.episode_reward = 0.0
