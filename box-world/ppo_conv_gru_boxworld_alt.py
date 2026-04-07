@@ -118,7 +118,6 @@ class ConvGRUAgent(nn.Module):
         hidden_dim,
         num_actions,
         num_layers=1,
-        bias=True,
     ):
         super().__init__()
         
@@ -202,16 +201,6 @@ class ConvGRUAgent(nn.Module):
 
 @draccus.wrap()
 def train(args: TrainConfig):
-# args = TrainConfig(
-#     track=True,
-#     max_episode_timesteps = 64,
-#     num_envs=256,
-#     total_timesteps=1e6,
-#     hidden_size=32,
-#     num_steps=16,
-#     num_layers=1,
-#     capture_video=True,
-# )
     if args.track:
         import wandb
         wandb.init(
