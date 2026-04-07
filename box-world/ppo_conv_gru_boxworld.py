@@ -33,6 +33,7 @@ class TrainConfig:
     num_distractor: int = 0
     distractor_length: int = 0
     keep_prev_world: bool = False
+    collect_key: bool = True
     max_episode_timesteps: int = 64
 
     # Algorithm specific arguments
@@ -74,6 +75,7 @@ class TrainConfig:
                 num_distractor=self.num_distractor,
                 distractor_length=self.distractor_length,
                 max_steps=int(self.max_episode_timesteps),
+                collect_key=self.collect_key,
                 keep_prev_world=self.keep_prev_world,
             ),
         )
