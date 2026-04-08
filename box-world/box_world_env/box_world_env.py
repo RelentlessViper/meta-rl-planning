@@ -48,7 +48,6 @@ class BoxWorld(gym.Env):
         max_steps=100,
         collect_key=True,
         world=None,
-        keep_prev_world=True,
         step_cost=0.01,
         # reward_gem = 10.0,
         # reward_key = 1.0,
@@ -86,7 +85,6 @@ class BoxWorld(gym.Env):
         self.world_dic = None
         self.owned_key = None
 
-        self.keep_prev_world = keep_prev_world
         self.prev_seed = None
 
         self.num_steps = 0
@@ -101,11 +99,14 @@ class BoxWorld(gym.Env):
 
         if options is not None:
             world_data = options.get("world", None)
+            keep_prev_world = options.get("keep_prev_world", True)
+        else:
+            keep_prev_world = True
 
         if world_data is not None:
             self.world, self.player_position, self.world_dic = world_data
 
-        elif self.keep_prev_world and self.prev_seed is not None:
+        elif keep_prev_world and self.prev_seed is not None:
             self.world, self.player_position, self.world_dic = world_gen(
                 n=self.n,
                 goal_length=self.goal_length,
