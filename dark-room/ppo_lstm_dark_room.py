@@ -1,19 +1,19 @@
 import os
 import random
 import time
+from dataclasses import dataclass
 
 import draccus
-from dataclasses import dataclass
-from tqdm import trange
-import toymeta
 import gymnasium as gym
-from gymnasium.envs import register
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions.categorical import Categorical
 from dark_room_wrappers import RL2DarkRoom
+from gymnasium.envs import register
+from torch.distributions.categorical import Categorical
+from tqdm import trange
+
 
 @dataclass
 class TrainConfig:
@@ -49,14 +49,16 @@ class TrainConfig:
     vf_coef: float = 0.5
     max_grad_norm: float = 10.0
     target_kl: float = None
-    
+
     def __post_init__(self):
         self.batch_size = int(self.num_envs * self.num_steps)
         self.minibatch_size = int(self.batch_size // self.num_minibatches)
         self.num_iterations = self.total_timesteps // self.batch_size
 
         self.env_id = f"Dark-Room-{self.room_size}x{self.room_size}-v0"
-        self.run_name = f"{self.env_id}__{self.exp_name}__{self.seed}__{int(time.time())}"
+        self.run_name = (
+            f"{self.env_id}__{self.exp_name}__{self.seed}__{int(time.time())}"
+        )
         register(
             id=f"Dark-Room-{self.room_size}x{self.room_size}-v0",
             entry_point="toymeta.dark_room:DarkRoom",
@@ -80,6 +82,7 @@ def make_env(env_id, idx, capture_video, run_name, num_trials):
         env = RL2DarkRoom(env, trials_per_episode=num_trials)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
+
     return thunk
 
 
@@ -93,7 +96,9 @@ class Agent(nn.Module):
     def __init__(self, envs, hidden_size, num_layers):
         super().__init__()
         self.in_proj = nn.Sequential(
-            layer_init(nn.Linear(np.prod(envs.single_observation_space.shape), hidden_size)),
+            layer_init(
+                nn.Linear(np.prod(envs.single_observation_space.shape), hidden_size)
+            ),
             nn.ReLU(),
         )
         self.lstm = nn.GRU(hidden_size, hidden_size, num_layers=num_layers)
@@ -102,7 +107,9 @@ class Agent(nn.Module):
                 nn.init.constant_(param, 0)
             elif "weight" in name:
                 nn.init.orthogonal_(param, 1.0)
-        self.actor = layer_init(nn.Linear(hidden_size, envs.single_action_space.n), std=0.01)
+        self.actor = layer_init(
+            nn.Linear(hidden_size, envs.single_action_space.n), std=0.01
+        )
         self.critic = layer_init(nn.Linear(hidden_size, 1), std=1)
 
     def get_state(self, x, lstm_state, done):
@@ -132,13 +139,20 @@ class Agent(nn.Module):
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(hidden), lstm_state
+        return (
+            action,
+            probs.log_prob(action),
+            probs.entropy(),
+            self.critic(hidden),
+            lstm_state,
+        )
 
 
 @draccus.wrap()
 def train(args: TrainConfig):
     if args.track:
         import wandb
+
         wandb.init(
             project=args.wandb_project_name,
             config=vars(args),
@@ -156,18 +170,28 @@ def train(args: TrainConfig):
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # env setup
-    envs = gym.vector.SyncVectorEnv([
-        make_env(args.env_id, i, args.capture_video, args.run_name, args.num_trials) 
-        for i in range(args.num_envs)
-    ])
-    assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+    envs = gym.vector.SyncVectorEnv(
+        [
+            make_env(args.env_id, i, args.capture_video, args.run_name, args.num_trials)
+            for i in range(args.num_envs)
+        ]
+    )
+    assert isinstance(envs.single_action_space, gym.spaces.Discrete), (
+        "only discrete action space is supported"
+    )
 
-    agent = Agent(envs, hidden_size=args.hidden_size, num_layers=args.num_layers).to(device)
+    agent = Agent(envs, hidden_size=args.hidden_size, num_layers=args.num_layers).to(
+        device
+    )
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
-    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
+    obs = torch.zeros(
+        (args.num_steps, args.num_envs) + envs.single_observation_space.shape
+    ).to(device)
+    actions = torch.zeros(
+        (args.num_steps, args.num_envs) + envs.single_action_space.shape
+    ).to(device)
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -179,7 +203,11 @@ def train(args: TrainConfig):
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
-    next_lstm_state = torch.zeros(agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size).to(device) # hidden and cell states (see https://youtu.be/8HyCNIVRbSU) Only hidden state since we are using GRU
+    next_lstm_state = torch.zeros(
+        agent.lstm.num_layers, args.num_envs, agent.lstm.hidden_size
+    ).to(
+        device
+    )  # hidden and cell states (see https://youtu.be/8HyCNIVRbSU) Only hidden state since we are using GRU
 
     # Model saving setup
     if args.save_best_model:
@@ -203,31 +231,42 @@ def train(args: TrainConfig):
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value, next_lstm_state = agent.get_action_and_value(next_obs, next_lstm_state, next_done)
+                action, logprob, _, value, next_lstm_state = agent.get_action_and_value(
+                    next_obs, next_lstm_state, next_done
+                )
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
 
             # TRY NOT TO MODIFY: execute the game and log data.
-            next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+            next_obs, reward, terminations, truncations, infos = envs.step(
+                action.cpu().numpy()
+            )
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+            next_obs, next_done = (
+                torch.Tensor(next_obs).to(device),
+                torch.Tensor(next_done).to(device),
+            )
 
             if "_episode" in infos:
                 for i, has_metrics in enumerate(infos["_episode"]):
                     if has_metrics:
-                        trial_goal = infos['trial_goal'][i]
+                        trial_goal = infos["trial_goal"][i]
                         wandb.log(
                             {
-                                f"returns/goal_{trial_goal[0]}_{trial_goal[1]}": infos['episode']['r'][i],
-                            }, 
-                            global_step
+                                f"returns/goal_{trial_goal[0]}_{trial_goal[1]}": infos[
+                                    "episode"
+                                ]["r"][i],
+                            },
+                            global_step,
                         )
-                        
+
         # bootstrap value if not done
         with torch.no_grad():
-            next_value = agent.get_value(next_obs, next_lstm_state, next_done).reshape(1, -1)
+            next_value = agent.get_value(next_obs, next_lstm_state, next_done).reshape(
+                1, -1
+            )
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
             for t in reversed(range(args.num_steps)):
@@ -237,8 +276,12 @@ def train(args: TrainConfig):
                 else:
                     nextnonterminal = 1.0 - dones[t + 1]
                     nextvalues = values[t + 1]
-                delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-                advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+                delta = (
+                    rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
+                )
+                advantages[t] = lastgaelam = (
+                    delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+                )
             returns = advantages + values
 
         # flatten the batch
@@ -261,7 +304,9 @@ def train(args: TrainConfig):
             for start in range(0, args.num_envs, envsperbatch):
                 end = start + envsperbatch
                 mbenvinds = envinds[start:end]
-                mb_inds = flatinds[:, mbenvinds].ravel()  # be really careful about the index
+                mb_inds = flatinds[
+                    :, mbenvinds
+                ].ravel()  # be really careful about the index
                 _, newlogprob, entropy, newvalue, _ = agent.get_action_and_value(
                     b_obs[mb_inds],
                     initial_lstm_state[:, mbenvinds],
@@ -275,15 +320,21 @@ def train(args: TrainConfig):
                     # calculate approx_kl http://joschu.net/blog/kl-approx.html
                     old_approx_kl = (-logratio).mean()
                     approx_kl = ((ratio - 1) - logratio).mean()
-                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+                    clipfracs += [
+                        ((ratio - 1.0).abs() > args.clip_coef).float().mean().item()
+                    ]
 
                 mb_advantages = b_advantages[mb_inds]
                 if args.norm_adv:
-                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (
+                        mb_advantages.std() + 1e-8
+                    )
 
                 # Policy loss
                 pg_loss1 = -mb_advantages * ratio
-                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+                pg_loss2 = -mb_advantages * torch.clamp(
+                    ratio, 1 - args.clip_coef, 1 + args.clip_coef
+                )
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
                 # Value loss

@@ -1,11 +1,11 @@
-import numpy as np
+from collections import deque
+
 import gymnasium as gym
+import matplotlib.pyplot as plt
+import numpy as np
 from gymnasium import spaces
 
-from collections import deque
-import matplotlib.pyplot as plt
-
-from .box_world_gen import world_gen, is_empty, update_color, goal_color, wall_color, grid_color
+from .box_world_gen import goal_color, is_empty, update_color, world_gen
 
 ACTION_LOOKUP = {
     0: "move up",
@@ -31,8 +31,9 @@ class BoxWorld(gym.Env):
       distractor_length (int): Number of distractor keys in each distractor trajectory
       max_steps (int): Maximum number of env step for a given level
       collect_key (bool): If true, a key is collected immediately when its corresponding lock is opened
-      world (np.ndarray): an existing level. If None, generates a new level by calling the world_gen() function 
+      world (np.ndarray): an existing level. If None, generates a new level by calling the world_gen() function
     """
+
     metadata = {
         "render_modes": ["human", "rgb_array"],
         "render_fps": 15,
@@ -41,17 +42,20 @@ class BoxWorld(gym.Env):
     def __init__(
         self,
         n=8,
-        goal_length=3,
-        num_distractor=1,
+        goal_length=1,
+        num_distractor=0,
         distractor_length=1,
-        max_steps=1000,
+        max_steps=100,
         collect_key=True,
         world=None,
         keep_prev_world=True,
-        step_cost=0.0,
-        reward_gem = 10.0,
-        reward_key = 1.0,
-        reward_distractor = -1.0,
+        step_cost=0.01,
+        # reward_gem = 10.0,
+        # reward_key = 1.0,
+        # reward_distractor = -1.0,
+        reward_gem=1.0,
+        reward_key=0.0,
+        reward_distractor=0.0,
         render_mode=None,
     ):
         super().__init__()
@@ -100,6 +104,7 @@ class BoxWorld(gym.Env):
 
         if world_data is not None:
             self.world, self.player_position, self.world_dic = world_data
+
         elif self.keep_prev_world and self.prev_seed is not None:
             self.world, self.player_position, self.world_dic = world_gen(
                 n=self.n,
@@ -220,7 +225,7 @@ class BoxWorld(gym.Env):
 
     def _get_obs(self):
         # [h, w, c] -> [c, h, w]
-        return np.transpose(self.world.astype(np.float32), (2, 0, 1))
+        return np.transpose(self.world.astype(np.uint8), (2, 0, 1))
 
     def render(self):
         img = self._get_render_image()
