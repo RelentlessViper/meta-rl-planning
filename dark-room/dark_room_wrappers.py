@@ -38,7 +38,7 @@ class RL2DarkRoom(gym.Wrapper):
         
     def reset(self, *, seed = None, options = None, hard_reset = False):
         """
-        Reset the environment (the agent position). If it was the last trila of an episode, then the new goal position will be sampled. Otherwise, the goal position remains the same.
+        Reset the environment (the agent position). If it was the last trial of an episode, then the new goal position will be sampled. Otherwise, the goal position remains the same.
         """
         if self.trial_counter == 0 or hard_reset:
             self.env.unwrapped.goal_pos = self.env.unwrapped.generate_goal()
