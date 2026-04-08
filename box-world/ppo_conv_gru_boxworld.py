@@ -32,6 +32,10 @@ class TrainConfig:
     goal_length: int = 2
     num_distractor: int = 0
     distractor_length: int = 0
+    step_cost: float = 0.0,
+    reward_gem: float = 1.0,
+    reward_key: float = 0.0,
+    reward_distractor: float = 0.0,
     keep_prev_world: bool = False
     collect_key: bool = True
     max_episode_timesteps: int = 64
@@ -77,6 +81,10 @@ class TrainConfig:
                 max_steps=int(self.max_episode_timesteps),
                 collect_key=self.collect_key,
                 keep_prev_world=self.keep_prev_world,
+                step_cost = self.step_cost,
+                reward_gem = self.reward_gem,
+                reward_key = self.reward_key,
+                reward_distractor = self.reward_distractor,
             ),
         )
 
