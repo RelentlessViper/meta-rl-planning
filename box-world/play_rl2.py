@@ -62,6 +62,7 @@ def main():
     current_trial_return = 0.0
     last_step_reward = 0.0
     last_trial_done = False
+    terminated, truncated = False, False
 
     # Matplotlib live viewer
     plt.ion()
@@ -86,6 +87,8 @@ def main():
             print(f"Last step reward:    {last_step_reward:.3f}")
             print(f"Trial return:        {current_trial_return:.3f}")
             print(f"Last trial done:     {last_trial_done}")
+            print(f"Terminated:          {terminated}")
+            print(f"Truncated:           {truncated}")
             print()
 
             print("Press a key...")
@@ -115,6 +118,7 @@ def main():
                     ended_trial = info.get("current_trial", None)
                     print(f"\nTrial finished: {ended_trial}")
                     print(f"Cumulative trial rewards: {info.get('cumulative_reward_per_trial', None)}")
+                    print(f"Terminated: {terminated}, truncated: {truncated}")
                     current_trial_return = 0.0
 
             # Update live image
