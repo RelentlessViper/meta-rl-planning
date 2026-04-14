@@ -92,8 +92,14 @@ class TrainConfig:
 def make_env(env_id, idx, num_trials, capture_video, run_name, capture_video_every_episode):
     def thunk():
         env = gym.make(env_id, render_mode="rgb_array")
-        if num_trials is not None and num_trials > 0:
-            env = RL2BoxWorld(env, trials_per_episode=num_trials)
+        if num_trials > 1:
+            env = RL2BoxWorld(env, trials_per_episode=num_trials) # Observation scaling is already defined here
+        else:
+            env = gym.wrappers.TransformObservation(
+                env,
+                lambda obs: obs.astype(np.float32) / 255.0,
+                env.observation_space,
+            )
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video and idx == 0:
             if capture_video_every_episode:
@@ -104,11 +110,6 @@ def make_env(env_id, idx, num_trials, capture_video, run_name, capture_video_eve
                 env = gym.wrappers.RecordVideo(
                     env, f"videos/{run_name}", episode_trigger=lambda t: t % 5 == 0
                 )
-        env = gym.wrappers.TransformObservation(
-            env,
-            lambda obs: obs.astype(np.float32) / 255.0,
-            env.observation_space,
-        )
         return env
 
     return thunk
