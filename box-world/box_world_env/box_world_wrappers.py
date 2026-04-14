@@ -35,8 +35,8 @@ class RL2BoxWorld(gym.Wrapper):
         self.action_c = self.scaled_env.action_space.n.__int__()
         self.image_c, self.h, self.w = self.scaled_env.observation_space.shape
         self.observation_space = gym.spaces.Box(
-            low=-1.0,
-            high=1.0,
+            low=-10.0,
+            high=10.0,
             shape=(
                 (self.image_c + self.action_c + 1 + 1, self.h, self.w)
             )
@@ -71,6 +71,7 @@ class RL2BoxWorld(gym.Wrapper):
                 np.zeros((1, self.h, self.w), dtype=np.float32),
                 np.ones((1, self.h, self.w), dtype=np.float32),
             ],
+            axis=0,
         )
         info["tril_done"] = False
         
