@@ -35,8 +35,8 @@ class RL2BoxWorld(gym.Wrapper):
         self.action_c = self.scaled_env.action_space.n.__int__()
         self.image_c, self.h, self.w = self.scaled_env.observation_space.shape
         self.observation_space = gym.spaces.Box(
-            low=-10.0,
-            high=10.0,
+            low=-1.0,
+            high=1.0,
             shape=(
                 (self.image_c + self.action_c + 1 + 1, self.h, self.w)
             )
@@ -99,7 +99,7 @@ class RL2BoxWorld(gym.Wrapper):
         else:
             info["trial_done"] = False
         
-        # obs_t+1, prev_action_t, prev_reward_scaled_t, prev_done_t
+        # obs_t+1, action_t, reward_scaled_t, done_t
         next_obs = np.concatenate(
             [
                 next_obs,
