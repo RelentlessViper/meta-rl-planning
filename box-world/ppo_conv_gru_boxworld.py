@@ -14,6 +14,8 @@ from gymnasium.envs import register
 from torch.distributions.categorical import Categorical
 from tqdm import trange
 
+from box_world_env import RL2BoxWorld
+
 
 @dataclass
 class TrainConfig:
@@ -32,12 +34,15 @@ class TrainConfig:
     goal_length: int = 2
     num_distractor: int = 0
     distractor_length: int = 0
-    keep_prev_world: bool = False
+    step_cost: float = 0.0
+    reward_gem: float = 1.0
+    reward_key: float = 0.0
+    reward_distractor: float = 0.0
     collect_key: bool = True
     max_episode_timesteps: int = 64
 
     # Algorithm specific arguments
-    num_trials: int = 3
+    num_trials: int = 3 # If positive integer, then training will occur in RL^2 setting
     hidden_size: int = 32
     num_layers: int = 1
     total_timesteps: int = 1_000_000
@@ -76,15 +81,27 @@ class TrainConfig:
                 distractor_length=self.distractor_length,
                 max_steps=int(self.max_episode_timesteps),
                 collect_key=self.collect_key,
-                keep_prev_world=self.keep_prev_world,
+                step_cost = self.step_cost,
+                reward_gem = self.reward_gem,
+                reward_key = self.reward_key,
+                reward_distractor = self.reward_distractor,
             ),
         )
 
 
-def make_env(env_id, idx, capture_video, run_name, capture_video_every_episode):
+def make_env(env_id, idx, num_trials, capture_video, run_name, capture_video_every_episode):
     def thunk():
+        env = gym.make(env_id, render_mode="rgb_array")
+        if num_trials > 1:
+            env = RL2BoxWorld(env, trials_per_episode=num_trials) # Observation scaling is already defined here
+        else:
+            env = gym.wrappers.TransformObservation(
+                env,
+                lambda obs: obs.astype(np.float32) / 255.0,
+                env.observation_space,
+            )
+        env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
             if capture_video_every_episode:
                 env = gym.wrappers.RecordVideo(
                     env, f"videos/{run_name}", episode_trigger=lambda x: True
@@ -93,18 +110,9 @@ def make_env(env_id, idx, capture_video, run_name, capture_video_every_episode):
                 env = gym.wrappers.RecordVideo(
                     env, f"videos/{run_name}", episode_trigger=lambda t: t % 5 == 0
                 )
-        else:
-            env = gym.make(env_id)
-        env = gym.wrappers.TransformObservation(
-            env,
-            lambda obs: obs.astype(np.float32) / 255.0,
-            env.observation_space,
-        )
-        env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
 
     return thunk
-
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -226,6 +234,7 @@ def train(args: TrainConfig):
             make_env(
                 args.env_id,
                 i,
+                args.num_trials,
                 args.capture_video,
                 args.run_name,
                 args.capture_video_every_episode,
@@ -238,7 +247,7 @@ def train(args: TrainConfig):
     )
 
     agent = ConvGRUAgent(
-        input_shape=(3, args.field_size + 2, args.field_size + 2),
+        input_shape=(envs.single_observation_space.shape[0], args.field_size + 2, args.field_size + 2),
         num_layers=args.num_layers,
         hidden_dim=args.hidden_size,
         num_actions=envs.single_action_space.n,
@@ -316,13 +325,8 @@ def train(args: TrainConfig):
                             },
                             global_step,
                         )
-                        print(
-                            f"step={global_step}", "returns: ", infos["episode"]["r"][i]
-                        )
                         # print(
-                        #     f"step={global_step}",
-                        #     "returns: ",
-                        #     infos["episode_internal"]["solved"][i],
+                        #     f"step={global_step}", "returns: ", infos["episode"]["r"][i]
                         # )
 
         # bootstrap value if not done
@@ -451,7 +455,10 @@ def train(args: TrainConfig):
                 global_step,
             )
 
-    envs.close()
+    try:
+        envs.close()
+    except:
+        pass
 
 
 if __name__ == "__main__":
