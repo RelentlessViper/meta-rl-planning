@@ -194,11 +194,8 @@ class BoxWorld(gym.Env):
                             reward += self.reward_distractor
                             terminated = True
                 else:
-                    self.owned_key = np.array([220, 220, 220], dtype=np.uint8)
-
-                    if self.world_dic.get(tuple(new_pos), 1) == 0:
-                        reward += self.reward_distractor
-                        terminated = True
+                    pass # We do not reset the key here
+        
             else:
                 possible_move = False
 
@@ -221,7 +218,6 @@ class BoxWorld(gym.Env):
             }
 
         obs = self._get_obs()
-
         return obs, reward, terminated, truncated, info
 
     def _get_obs(self):
@@ -229,7 +225,7 @@ class BoxWorld(gym.Env):
         return np.transpose(self.world.astype(np.uint8), (2, 0, 1))
 
     def render(self):
-        img = self._get_render_image()
+        img = self.get_render_image()
 
         if self.render_mode == "rgb_array":
             return img
@@ -245,7 +241,7 @@ class BoxWorld(gym.Env):
             plt.pause(1.0 / self.metadata["render_fps"])
             plt.draw()
 
-    def _get_render_image(self):
+    def get_render_image(self):
         """
         Returns a properly formatted RGB image (uint8, enlarged).
         """
