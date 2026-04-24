@@ -68,7 +68,7 @@ class TrainConfig:
 
         self.env_id = f"Box-World-{self.field_size}x{self.field_size}-{self.goal_length}-{self.num_distractor}-v0"
         self.run_name = (
-            f"{self.env_id}__{self.exp_name}__{self.seed}__{int(time.time())}"
+            f"{self.env_id}__{int(time.time())}__{self.exp_name}__{self.seed}"
         )
         register(
             id=self.env_id,
@@ -162,11 +162,11 @@ class ConvGRUAgent(nn.Module):
             std=1.0,
         )
 
-    def get_state(self, x, lstm_state, done):
+    def get_state(self, x, gru_state, done):
         hidden = self.in_proj(x)
 
         # RNN logic
-        batch_size = lstm_state.shape[1]
+        batch_size = gru_state.shape[1]
         hidden = hidden.reshape(
             (
                 -1,
@@ -180,20 +180,20 @@ class ConvGRUAgent(nn.Module):
 
         new_hidden = []
         for h, d in zip(hidden, done):
-            h, lstm_state = self.rnn(
+            h, gru_state = self.rnn(
                 h.unsqueeze(0),
-                (1.0 - d).view(1, -1, 1, 1, 1) * lstm_state,
+                (1.0 - d).view(1, -1, 1, 1, 1) * gru_state,
             )
             new_hidden += [h.flatten(-3, -1)]
         new_hidden = torch.flatten(torch.cat(new_hidden), 0, 1)
-        return new_hidden, lstm_state
+        return new_hidden, gru_state
 
-    def get_value(self, x, lstm_state, done):
-        hidden, _ = self.get_state(x, lstm_state, done)
+    def get_value(self, x, gru_state, done):
+        hidden, _ = self.get_state(x, gru_state, done)
         return self.critic(hidden)
 
-    def get_action_and_value(self, x, lstm_state, done, action=None):
-        hidden, lstm_state = self.get_state(x, lstm_state, done)
+    def get_action_and_value(self, x, gru_state, done, action=None):
+        hidden, gru_state = self.get_state(x, gru_state, done)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         if action is None:
@@ -203,9 +203,8 @@ class ConvGRUAgent(nn.Module):
             probs.log_prob(action),
             probs.entropy(),
             self.critic(hidden),
-            lstm_state,
+            gru_state,
         )
-
 
 @draccus.wrap()
 def train(args: TrainConfig):
