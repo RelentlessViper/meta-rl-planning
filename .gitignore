@@ -229,3 +229,5 @@ experiment_results/
 experiment_test.py
 test_run.sh
 wandb_setup.py
+test_env.py
+test_new_env.py
