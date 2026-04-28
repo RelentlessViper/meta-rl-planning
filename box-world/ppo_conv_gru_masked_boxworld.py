@@ -27,7 +27,10 @@ class TrainConfig:
     wandb_project_name: str = "rl2-boxworld-meta"
     capture_video: bool = True
     capture_video_every_episode: bool = False
+    save_video_path: str = None
     save_best_model: bool = False
+    save_model_path: str = None
+    existing_model_path: str = None
 
     # Box World arguments
     field_size: int = 5
@@ -37,6 +40,7 @@ class TrainConfig:
     step_cost: float = 0.0
     reward_gem: float = 1.0
     reward_key: float = 0.0
+    reward_chest: float = 0.0
     reward_distractor: float = 0.0
     max_episode_timesteps: int = 64
 
@@ -69,6 +73,8 @@ class TrainConfig:
         self.run_name = (
             f"{self.env_id}__{int(time.time())}__{self.exp_name}__{self.seed}"
         )
+        self.save_video_path = f"videos/{self.run_name}" if self.save_video_path is None else self.save_video_path + f"/{self.run_name}"
+        self.save_model_path = "checkpoints" if self.save_model_path is None else self.save_model_path
         register(
             id=self.env_id,
             entry_point="box_world_env.box_world_env:BoxWorld",
@@ -83,12 +89,13 @@ class TrainConfig:
                 step_cost = self.step_cost,
                 reward_gem = self.reward_gem,
                 reward_key = self.reward_key,
+                reward_chest = self.reward_chest,
                 reward_distractor = self.reward_distractor,
             ),
         )
 
 
-def make_env(env_id, idx, num_trials, capture_video, run_name, capture_video_every_episode):
+def make_env(env_id, idx, num_trials, capture_video, run_name, capture_video_every_episode, video_path):
     def thunk():
         env = gym.make(env_id, render_mode="rgb_array")
         env = RevealChestContentsWrapper(env)
@@ -104,11 +111,11 @@ def make_env(env_id, idx, num_trials, capture_video, run_name, capture_video_eve
         if capture_video and idx == 0:
             if capture_video_every_episode:
                 env = gym.wrappers.RecordVideo(
-                    env, f"videos/{run_name}", episode_trigger=lambda x: True
+                    env, video_path, episode_trigger=lambda x: True
                 )
             else:
                 env = gym.wrappers.RecordVideo(
-                    env, f"videos/{run_name}", episode_trigger=lambda t: t % 5 == 0
+                    env, video_path, episode_trigger=lambda t: t % 5 == 0
                 )
         return env
 
@@ -237,6 +244,7 @@ def train(args: TrainConfig):
                 args.capture_video,
                 args.run_name,
                 args.capture_video_every_episode,
+                args.save_video_path,
             )
             for i in range(args.num_envs)
         ]
@@ -252,6 +260,8 @@ def train(args: TrainConfig):
         num_actions=envs.single_action_space.n,
     ).to(device)
     agent = torch.compile(agent)
+    if args.existing_model_path is not None:
+        agent.load_state_dict(torch.load(args.existing_model_path, weights_only=True)["model_state_dict"])
 
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -279,8 +289,8 @@ def train(args: TrainConfig):
     if args.save_best_model:
         running_return = 0.0
         best_running_return = -float("inf")
-        best_model_path = os.path.join("checkpoints", f"{args.run_name}_best.pt")
-        os.makedirs("checkpoints", exist_ok=True)
+        best_model_path = os.path.join(args.save_model_path, f"{args.run_name}_best.pt")
+        os.makedirs(args.save_model_path, exist_ok=True)
 
     for iteration in trange(1, args.num_iterations + 1):
         initial_hidden_state = next_hidden_state.clone()

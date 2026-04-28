@@ -54,6 +54,7 @@ class BoxWorld(gym.Env):
         # reward_distractor = -1.0,
         reward_gem=1.0,
         reward_key=0.0,
+        reward_chest=0.0,
         reward_distractor=0.0,
         render_mode=None,
     ):
@@ -70,6 +71,7 @@ class BoxWorld(gym.Env):
         self.step_cost = step_cost
         self.reward_gem = reward_gem
         self.reward_key = reward_key
+        self.reward_chest = reward_chest
         self.reward_distractor = reward_distractor
 
         self.action_space = spaces.Discrete(4)
@@ -178,7 +180,7 @@ class BoxWorld(gym.Env):
         else:
             if np.array_equal(self.world[new_pos[0], new_pos[1]], self.owned_key):
                 possible_move = True
-
+                reward += self.reward_chest
                 if self.collect_key:
                     next_key = self.world[new_pos[0], new_pos[1] - 1]
 
