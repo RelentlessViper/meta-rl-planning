@@ -134,7 +134,7 @@ class RevealChestContentsWrapper(gym.Wrapper):
       - loose keys are untouched, because they are not in world_dic
     """
 
-    def __init__(self, env, mask_color=(35, 46, 52), content_offset=-1):
+    def __init__(self, env, mask_color=(35, 46, 52), content_offset=-1, render_original_env=True):
         super().__init__(env)
 
         if getattr(self.env.unwrapped, "collect_key", None) is True:
@@ -144,6 +144,7 @@ class RevealChestContentsWrapper(gym.Wrapper):
 
         self.mask_color = np.asarray(mask_color, dtype=np.uint8)
         self.content_offset = content_offset
+        self.render_original_env = render_original_env
 
         # Track which chests have been opened so far
         self._opened_chests = set()
@@ -251,8 +252,28 @@ class RevealChestContentsWrapper(gym.Wrapper):
         original = self._get_original_world_image()
         masked = self._get_masked_world_image()
 
-        import matplotlib.pyplot as plt
-        import numpy as np
+        if not self.render_original_env:
+
+            # Cache a single-axes figure
+            if not hasattr(self, "_fig"):
+                self._fig, self._ax = plt.subplots(1, 1, figsize=(5, 5), dpi=100)
+
+            ax = self._ax
+            ax.clear()
+            ax.imshow(masked, interpolation="nearest")
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            self._fig.tight_layout(pad=0)
+            self._fig.canvas.draw()
+
+            frame = np.asarray(self._fig.canvas.buffer_rgba())[:, :, :3].copy()
+
+            if getattr(self.env, "render_mode", None) == "human":
+                plt.pause(1.0 / self.env.metadata.get("render_fps", 30))
+                plt.draw()
+
+            return frame
 
         # Build the frame with titles baked in
         if not hasattr(self, "_fig"):
@@ -279,39 +300,6 @@ class RevealChestContentsWrapper(gym.Wrapper):
 
         if self.env.render_mode == "human":
             plt.pause(1.0 / self.env.metadata["render_fps"])
-            plt.draw()
-
-        return frame
-    
-    def render_masked(self):
-        """
-        Render only the masked world image as an RGB array.
-
-        This is friendlier for downstream wrappers that want to annotate
-        the frame for probe predictions.
-        """
-        masked = self._get_masked_world_image()
-
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        # Cache a single-axes figure
-        if not hasattr(self, "_fig"):
-            self._fig, self._ax = plt.subplots(1, 1, figsize=(5, 5), dpi=100)
-
-        ax = self._ax
-        ax.clear()
-        ax.imshow(masked, interpolation="nearest")
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-        self._fig.tight_layout(pad=0)
-        self._fig.canvas.draw()
-
-        frame = np.asarray(self._fig.canvas.buffer_rgba())[:, :, :3].copy()
-
-        if getattr(self.env, "render_mode", None) == "human":
-            plt.pause(1.0 / self.env.metadata.get("render_fps", 30))
             plt.draw()
 
         return frame
@@ -431,7 +419,7 @@ class ProbeRenderWrapper(gym.Wrapper):
         env,
         probe,
         action_meanings=None,
-        alpha=0.75,
+        alpha=0.3,
         fps=8,   # lower = slower animation
     ):
         super().__init__(env)
@@ -471,7 +459,7 @@ class ProbeRenderWrapper(gym.Wrapper):
         return pred_ids.reshape(H, W)
 
     def render(self):
-        base_frame = self.env.render_masked()
+        base_frame = self.env.render()
         if base_frame is None:
             return None
 
@@ -495,8 +483,8 @@ class ProbeRenderWrapper(gym.Wrapper):
             cell_h = img_h / H
             cell_w = img_w / W
 
-            for r in range(H):
-                for c in range(W):
+            for r in range(1, H - 1):
+                for c in range(1, W - 1):
                     action_id = int(pred_map[r, c])
                     label = self.action_meanings.get(action_id, str(action_id))
 
@@ -508,7 +496,7 @@ class ProbeRenderWrapper(gym.Wrapper):
                         fontsize=12,
                         ha="center",
                         va="center",
-                        weight="bold",
+                        weight="normal",
                         bbox=dict(
                             facecolor="black",
                             alpha=self.alpha,
