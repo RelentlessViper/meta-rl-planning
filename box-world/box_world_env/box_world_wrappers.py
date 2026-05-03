@@ -282,3 +282,248 @@ class RevealChestContentsWrapper(gym.Wrapper):
             plt.draw()
 
         return frame
+    
+    def render_masked(self):
+        """
+        Render only the masked world image as an RGB array.
+
+        This is friendlier for downstream wrappers that want to annotate
+        the frame for probe predictions.
+        """
+        masked = self._get_masked_world_image()
+
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        # Cache a single-axes figure
+        if not hasattr(self, "_fig"):
+            self._fig, self._ax = plt.subplots(1, 1, figsize=(5, 5), dpi=100)
+
+        ax = self._ax
+        ax.clear()
+        ax.imshow(masked, interpolation="nearest")
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        self._fig.tight_layout(pad=0)
+        self._fig.canvas.draw()
+
+        frame = np.asarray(self._fig.canvas.buffer_rgba())[:, :, :3].copy()
+
+        if getattr(self.env, "render_mode", None) == "human":
+            plt.pause(1.0 / self.env.metadata.get("render_fps", 30))
+            plt.draw()
+
+        return frame
+
+class DifficultyRandomizerWrapper(gym.Wrapper):
+    """
+    Randomizes BoxWorld difficulty on every reset by sampling:
+      - goal_length
+      - num_distractor
+      - distractor_length
+
+    Optional:
+      - max_steps can also be randomized or scaled with difficulty
+    """
+
+    def __init__(
+        self,
+        env,
+        max_goal_length=3,
+        max_num_distractor=3,
+        max_distractor_length=3,
+        seed=None,
+    ):
+        super().__init__(env)
+
+        self.max_goal_length = max_goal_length
+        self.max_num_distractor = max_num_distractor
+        self.max_distractor_length = max_distractor_length
+
+        self.rng = np.random.default_rng(seed)
+
+        # Preserve spaces
+        self.action_space = env.action_space
+        self.observation_space = env.observation_space
+
+    def _sample_int_range(self, low_high):
+        low, high = low_high
+        return int(self.rng.integers(low, high + 1))
+
+    def _sample_task(self):
+        base = self.env.unwrapped
+        task = {
+            "goal_length": self._sample_int_range((1, self.max_goal_length)) if self.max_goal_length is not None else base.goal_length,
+            "num_distractor": self._sample_int_range((1, self.max_num_distractor)) if self.max_num_distractor is not None else base.num_distractor,
+            "distractor_length": self._sample_int_range((1, self.max_distractor_length)) if self.max_distractor_length is not None else base.distractor_length,
+        }
+        if task["distractor_length"] == 0 and task["num_distractor"] > 0: # Safety measure
+            task["distractor_length"] = 1
+
+        task["max_steps"] = self._calculate_max_timesteps(
+            self.env.unwrapped.n,
+            task["goal_length"],
+            task["num_distractor"],
+            task["distractor_length"],
+        )
+
+        return task
+    
+    def _calculate_max_timesteps(self, n, goal_length, num_distractor, distractor_length):
+        return int(
+            0.35 * n * n
+            + 4 * goal_length
+            + 3 * num_distractor
+            + 2 * num_distractor * distractor_length
+        )
+
+    def reset(self, seed=None, options=None):
+        options = dict(options or {})
+
+        if options.get("keep_prev_world", True):
+            options["keep_prev_world"] = True
+            obs, info = self.env.reset(seed=seed, options=options)
+            return obs, info
+
+        # If a specific world is injected manually, do not override it.
+        if options.get("world", None) is None:
+            task = self._sample_task()
+
+            base = self.env.unwrapped
+            base.goal_length = task["goal_length"]
+            base.num_distractor = task["num_distractor"]
+            base.distractor_length = task["distractor_length"]
+            base.max_steps = task["max_steps"]
+
+            obs, info = self.env.reset(seed=seed, options=options)
+            info = dict(info)
+            info["task_params"] = task
+            return obs, info
+
+        # Manual world override
+        obs, info = self.env.reset(seed=seed, options=options)
+        info = dict(info)
+        info["task_params"] = {
+            "goal_length": getattr(self.env.unwrapped, "goal_length", None),
+            "num_distractor": getattr(self.env.unwrapped, "num_distractor", None),
+            "distractor_length": getattr(self.env.unwrapped, "distractor_length", None),
+            "max_steps": getattr(self.env.unwrapped, "max_steps", None),
+        }
+        return obs, info
+    
+
+class ProbeRenderWrapper(gym.Wrapper):
+    """
+    Overlay per-cell probe predictions on top of the base env render.
+
+    Expected hidden state shape:
+        (n_hidden, H, W)
+
+    Expected probe API:
+        probe.predict(X) -> action ids
+    where X has shape:
+        (H * W, n_hidden)
+    """
+
+    def __init__(
+        self,
+        env,
+        probe,
+        action_meanings=None,
+        alpha=0.75,
+        fps=8,   # lower = slower animation
+    ):
+        super().__init__(env)
+        self.probe = probe
+        self.hidden_state = None
+        self.alpha = alpha
+        self.fps = fps
+
+        self.action_meanings = action_meanings or {
+            0: "↑",
+            1: "↓",
+            2: "←",
+            3: "→",
+            5: "x",
+        }
+
+        self._fig = None
+        self._ax = None
+
+        # Make render speed explicit for wrappers that consult metadata.
+        self.metadata = dict(getattr(env, "metadata", {}))
+        self.metadata["render_fps"] = fps
+
+    def set_hidden_state(self, hidden_state):
+        self.hidden_state = hidden_state
+
+    def _predict_actions(self):
+        if self.hidden_state is None:
+            return None
+
+        # (C, H, W) -> (H, W, C) -> (H*W, C)
+        hs = np.transpose(self.hidden_state, (1, 2, 0))
+        H, W, C = hs.shape
+        features = hs.reshape(-1, C)
+
+        pred_ids = self.probe.predict(features)
+        return pred_ids.reshape(H, W)
+
+    def render(self):
+        base_frame = self.env.render_masked()
+        if base_frame is None:
+            return None
+
+        pred_map = self._predict_actions()
+
+        if self._fig is None:
+            self._fig, self._ax = plt.subplots(
+                figsize=(base_frame.shape[1] / 100, base_frame.shape[0] / 100),
+                dpi=100,
+            )
+
+        ax = self._ax
+        ax.clear()
+        ax.imshow(base_frame)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        if pred_map is not None:
+            H, W = pred_map.shape
+            img_h, img_w = base_frame.shape[:2]
+            cell_h = img_h / H
+            cell_w = img_w / W
+
+            for r in range(H):
+                for c in range(W):
+                    action_id = int(pred_map[r, c])
+                    label = self.action_meanings.get(action_id, str(action_id))
+
+                    ax.text(
+                        (c + 0.5) * cell_w,
+                        (r + 0.5) * cell_h,
+                        label,
+                        color="white",
+                        fontsize=12,
+                        ha="center",
+                        va="center",
+                        weight="bold",
+                        bbox=dict(
+                            facecolor="black",
+                            alpha=self.alpha,
+                            edgecolor="none",
+                            pad=1.0,
+                        ),
+                    )
+
+        self._fig.tight_layout(pad=0)
+        self._fig.canvas.draw()
+
+        frame = np.asarray(self._fig.canvas.buffer_rgba())[:, :, :3].copy()
+
+        if getattr(self.env, "render_mode", None) == "human":
+            plt.pause(1.0 / self.fps)
+            plt.draw()
+
+        return frame

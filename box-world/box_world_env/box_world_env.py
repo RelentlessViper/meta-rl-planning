@@ -45,7 +45,7 @@ class BoxWorld(gym.Env):
         goal_length=1,
         num_distractor=0,
         distractor_length=1,
-        max_steps=100,
+        max_steps=None,
         collect_key=True,
         world=None,
         step_cost=0.01,
@@ -64,9 +64,18 @@ class BoxWorld(gym.Env):
         self.goal_length = goal_length
         self.num_distractor = num_distractor
         self.distractor_length = distractor_length
-        self.max_steps = max_steps
         self.collect_key = collect_key
         self.render_mode = render_mode
+
+        if max_steps is None: # Use dynamic horizon scaling
+            self.max_steps = int(
+                0.35 * n * n
+                + 4 * goal_length
+                + 3 * num_distractor
+                + 2 * num_distractor * distractor_length
+            )
+        else:
+            self.max_steps = max_steps
 
         self.step_cost = step_cost
         self.reward_gem = reward_gem
