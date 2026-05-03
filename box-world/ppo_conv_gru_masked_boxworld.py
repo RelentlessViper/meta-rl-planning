@@ -14,7 +14,7 @@ from gymnasium.envs import register
 from torch.distributions.categorical import Categorical
 from tqdm import trange
 
-from box_world_env import RevealChestContentsWrapper, RL2BoxWorld
+from box_world_env import RevealChestContentsWrapper, RL2BoxWorld, DifficultyRandomizerWrapper
 
 
 @dataclass
@@ -43,6 +43,11 @@ class TrainConfig:
     reward_chest: float = 0.0
     reward_distractor: float = 0.0
     max_episode_timesteps: int = 64
+
+    # Randomized Box World arguments
+    max_goal_length: int = None
+    max_num_distractor: int = None
+    max_distractor_length: int = None
 
     # Algorithm specific arguments
     num_trials: int = 3 # If positive integer, then training will occur in RL^2 setting
@@ -95,9 +100,27 @@ class TrainConfig:
         )
 
 
-def make_env(env_id, idx, num_trials, capture_video, run_name, capture_video_every_episode, video_path):
+def make_env(
+    env_id,
+    idx,
+    num_trials,
+    max_goal_length,
+    max_num_distractor,
+    max_distractor_length,
+    capture_video,
+    run_name,
+    capture_video_every_episode,
+    video_path,
+):
     def thunk():
         env = gym.make(env_id, render_mode="rgb_array")
+        if any([max_goal_length, max_num_distractor, max_distractor_length]):
+            env = DifficultyRandomizerWrapper(
+                env,
+                max_goal_length=max_goal_length,
+                max_num_distractor=max_num_distractor,
+                max_distractor_length=max_distractor_length,
+            )
         env = RevealChestContentsWrapper(env)
         if num_trials > 1:
             env = RL2BoxWorld(env, trials_per_episode=num_trials) # Observation scaling is already defined here
@@ -241,6 +264,9 @@ def train(args: TrainConfig):
                 args.env_id,
                 i,
                 args.num_trials,
+                args.max_goal_length,
+                args.max_num_distractor,
+                args.max_distractor_length,
                 args.capture_video,
                 args.run_name,
                 args.capture_video_every_episode,
