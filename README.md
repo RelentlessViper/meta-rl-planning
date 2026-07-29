@@ -1,4 +1,4 @@
-# Meta RL Planning
+# Planning in Meta RL
 
 Implementation of recurrent **Meta-Reinforcement Learning (Meta-RL)** agents together with **Linear Probing** utilities for investigating planning and memory representations learned by the agents.
 
